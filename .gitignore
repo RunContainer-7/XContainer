@@ -1,41 +1,34 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
 
-# dependencies
-node_modules/
-
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
-.kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+# Build
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
 
 # macOS
 .DS_Store
+
+# Signing (never commit these)
+*.p12
+*.mobileprovision
 *.pem
+*.key
+*.p8
+*.jks
 
-# local env files
+# local env
 .env*.local
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
