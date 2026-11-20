@@ -1,4 +1,7 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+import WebKit
 
 // Root: 5 fixed tabs + one extra tab per pinned module ("panel in your tab").
 struct ContentView: View {
@@ -146,6 +149,7 @@ struct ModulesView: View {
     @Binding var selection: String
     @State private var lastRunText = ""
     @State private var lastRunError = ""
+    @State private var showImporter = false
 
     var body: some View {
         VStack {
@@ -189,6 +193,18 @@ struct ModulesView: View {
                                 selection = "editor"
                             }
                             .buttonStyle(.bordered)
+                            Button("Duplicate") {
+                                store.duplicate(mod)
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Copy") {
+                                UIPasteboard.general.string = mod.code
+                                lastRunError = ""
+                                lastRunText = mod.name + ": code copied"
+                            }
+                            .buttonStyle(.bordered)
+                            ShareLink("Share", item: mod.code)
+                                .buttonStyle(.bordered)
                         }
                         .font(.caption)
                     }
@@ -223,11 +239,24 @@ struct ModulesView: View {
         }
         .navigationTitle("Modules")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showImporter = true
+                } label: { Image(systemName: "square.and.arrow.down") }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     store.editingModuleID = nil
                     selection = "editor"
                 } label: { Image(systemName: "plus") }
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .javaScript]) { res in
+            if let url = try? res.get() {
+                if let text = try? String(contentsOf: url, encoding: .utf8) {
+                    let base = url.deletingPathExtension().lastPathComponent
+                    store.importModule(name: base.isEmpty ? "Imported module" : base, code: text)
+                }
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -249,6 +278,55 @@ struct ModulesView: View {
     }
 }
 
+// MARK: - Safe runner (JS runs off main thread, Stop + timeout included)
+final class SafeRunner: ObservableObject {
+    @Published var result: JSRunResult? = nil
+    @Published var isRunning = false
+    private var generation = 0
+
+    func start(_ code: String, timeout: Double = 5) {
+        generation += 1
+        let g = generation
+        isRunning = true
+        result = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = JSEngine.run(code)
+            DispatchQueue.main.async {
+                guard g == self.generation else { return }
+                self.result = r
+                self.isRunning = false
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            guard g == self.generation && self.isRunning else { return }
+            self.generation += 1
+            self.isRunning = false
+            var t = JSRunResult()
+            t.error = "Timed out - likely an infinite loop. Tap Re-run to try again."
+            self.result = t
+        }
+    }
+
+    func stop() {
+        generation += 1
+        isRunning = false
+    }
+}
+
+func looksLikeHTML(_ s: String) -> Bool {
+    let lower = s.lowercased()
+    guard s.contains("<") && s.contains(">") else { return false }
+    return lower.contains("<html") || lower.contains("<div") || lower.contains("<button") || lower.contains("<h1") || lower.contains("<p") || lower.contains("<style")
+}
+
+struct HTMLView: UIViewRepresentable {
+    let html: String
+    func makeUIView(context: Context) -> WKWebView { WKWebView() }
+    func updateUIView(_ view: WKWebView, context: Context) {
+        view.loadHTMLString(html, baseURL: nil)
+    }
+}
+
 // MARK: - Shared output view
 struct RunOutputView: View {
     let result: JSRunResult
@@ -265,13 +343,20 @@ struct RunOutputView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             if !result.result.isEmpty {
-                Text("Return value").font(.caption.bold()).foregroundStyle(.secondary)
-                Text(result.result)
-                    .font(.system(.callout, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.green.opacity(0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                if looksLikeHTML(result.result) {
+                    Text("App output (interactive)").font(.caption.bold()).foregroundStyle(.secondary)
+                    HTMLView(html: result.result)
+                        .frame(minHeight: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Text("Return value").font(.caption.bold()).foregroundStyle(.secondary)
+                    Text(result.result)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
             }
             if let e = result.error, !e.isEmpty {
                 Text("Error").font(.caption.bold()).foregroundStyle(.red)
@@ -290,7 +375,7 @@ struct RunOutputView: View {
 struct ModuleDetailView: View {
     @EnvironmentObject var store: ModuleStore
     let moduleID: UUID
-    @State private var result: JSRunResult? = nil
+    @StateObject private var runner = SafeRunner()
 
     private var module: Module? { store.modules.first(where: { $0.id == moduleID }) }
 
@@ -308,18 +393,23 @@ struct ModuleDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     HStack {
-                        Button("Re-run") { result = JSEngine.run(m.code) }
+                        Button("Re-run") { runner.start(m.code) }
                             .buttonStyle(.borderedProminent)
+                            .disabled(runner.isRunning)
+                        if runner.isRunning {
+                            Button("Stop") { runner.stop() }
+                                .buttonStyle(.bordered)
+                        }
                         Button(m.isPinned ? "Unpin from Tabs" : "Pin to Tabs") {
                             store.togglePin(m)
                         }
                         .buttonStyle(.bordered)
                     }
 
-                    if let r = result {
+                    if runner.isRunning {
+                        Text("Running… (Stop frees the app if it loops)").foregroundStyle(.secondary)
+                    } else if let r = runner.result {
                         RunOutputView(result: r)
-                    } else {
-                        Text("Running…").foregroundStyle(.secondary)
                     }
                 } else {
                     Text("This module was deleted.").foregroundStyle(.secondary)
@@ -331,16 +421,10 @@ struct ModuleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(Color.black.ignoresSafeArea())
         .onAppear {
-            if let m = module {
-                result = JSEngine.run(m.code)
-            }
+            if let m = module { runner.start(m.code) }
         }
         .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module {
-                result = JSEngine.run(m.code)
-            } else {
-                result = nil
-            }
+            if let m = module { runner.start(m.code) }
         }
     }
 }
@@ -349,7 +433,7 @@ struct ModuleDetailView: View {
 struct ModulePanelView: View {
     @EnvironmentObject var store: ModuleStore
     let moduleID: UUID
-    @State private var result: JSRunResult? = nil
+    @StateObject private var runner = SafeRunner()
 
     private var module: Module? { store.modules.first(where: { $0.id == moduleID }) }
 
@@ -358,9 +442,18 @@ struct ModulePanelView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let m = module {
                     Text(m.name).font(.title2.bold())
-                    Button("Re-run") { result = JSEngine.run(m.code) }
-                        .buttonStyle(.borderedProminent)
-                    if let r = result {
+                    HStack {
+                        Button("Re-run") { runner.start(m.code) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(runner.isRunning)
+                        if runner.isRunning {
+                            Button("Stop") { runner.stop() }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    if runner.isRunning {
+                        Text("Running…").foregroundStyle(.secondary)
+                    } else if let r = runner.result {
                         RunOutputView(result: r)
                     }
                 } else {
@@ -372,10 +465,10 @@ struct ModulePanelView: View {
         .navigationTitle(module?.name ?? "Panel")
         .background(Color.black.ignoresSafeArea())
         .onAppear {
-            if let m = module { result = JSEngine.run(m.code) }
+            if let m = module { runner.start(m.code) }
         }
         .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module { result = JSEngine.run(m.code) }
+            if let m = module { runner.start(m.code) }
         }
     }
 }

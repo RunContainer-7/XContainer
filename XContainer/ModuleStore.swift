@@ -57,6 +57,21 @@ final class ModuleStore: ObservableObject {
         save()
     }
 
+    func duplicate(_ module: Module) -> Module {
+        let copy = Module(name: module.name + " copy", code: module.code, isPinned: false)
+        modules.append(copy)
+        save()
+        return copy
+    }
+
+    func importModule(name: String, code: String) -> Module {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let m = Module(name: clean.isEmpty ? "Imported module" : clean, code: code, isPinned: false)
+        modules.append(m)
+        save()
+        return m
+    }
+
     func togglePin(_ module: Module) {
         guard let i = modules.firstIndex(where: { $0.id == module.id }) else { return }
         modules[i].isPinned.toggle()
@@ -128,6 +143,25 @@ final class ModuleStore: ObservableObject {
                 console.log("You: " + question);
                 answer(question);
                 """
+            ),
+            Module(
+                name: "Counter App",
+                code: """
+                // Interactive tab: return HTML and the panel renders it.
+                // Tap the buttons in the panel — that's real <script> running in the tab.
+                var count = parseInt(localStorage.getItem("counter") || "0");
+                function render(n) {
+                  return "<div style='font-family:-apple-system;padding:20px;text-align:center'>"
+                    + "<h1>" + n + "</h1>"
+                    + "<button onclick='window.webkit.messageHandlers.noop.postMessage(1)' style='font-size:20px;padding:10px 20px'>+1</button>"
+                    + "<p style='color:#888'>Counter demo — full tap handling needs a bridge; edit me to style it!</p>"
+                    + "</div>";
+                }
+                console.log("Counter loaded: " + count);
+                localStorage.setItem("counter", String(count + 1));
+                render(count);
+                """,
+                isPinned: true
             ),
             Module(
                 name: "Dice Game",

@@ -8,8 +8,9 @@ struct EditorView: View {
     @State private var name = ""
     @State private var code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
     @State private var pinAsPanel = true
-    @State private var result: JSRunResult? = nil
+    @StateObject private var runner = SafeRunner()
     @State private var loadedID: UUID? = nil
+    @State private var fontSize: Double = 15
 
     private var isEditing: Bool { loadedID != nil }
 
@@ -23,9 +24,16 @@ struct EditorView: View {
                 TextField("My first module", text: $name)
                     .textFieldStyle(.roundedBorder)
 
-                Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(code.components(separatedBy: "\n").count) lines").font(.caption).foregroundStyle(.secondary)
+                    Button("A-") { fontSize = max(11, fontSize - 1) }.font(.caption)
+                    Button("A+") { fontSize = min(22, fontSize + 1) }.font(.caption)
+                    Button("Clear") { code = "" }.font(.caption)
+                }
                 TextEditor(text: $code)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(size: fontSize, design: .monospaced))
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 220)
                     .padding(8)
@@ -38,13 +46,17 @@ struct EditorView: View {
                     .font(.caption)
 
                 HStack {
-                    Button("Run") {
-                        result = JSEngine.run(code)
+                    Button(runner.isRunning ? "Running…" : "Run") {
+                        runner.start(code)
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
-
-                    Button(isEditing ? "Save" : "Save") {
+                    .disabled(runner.isRunning)
+                    if runner.isRunning {
+                        Button("Stop") { runner.stop() }
+                            .buttonStyle(.bordered)
+                    }
+                    Button("Save") {
                         save()
                     }
                     .buttonStyle(.bordered)
@@ -58,12 +70,12 @@ struct EditorView: View {
                         loadedID = nil
                         name = ""
                         code = "// write your script here"
-                        result = nil
+                        runner.stop()
                     }
                     .font(.caption)
                 }
 
-                if let r = result {
+                if let r = runner.result {
                     RunOutputView(result: r)
                 }
             }
@@ -90,7 +102,7 @@ struct EditorView: View {
             code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
             pinAsPanel = true
         }
-        result = nil
+        runner.stop()
     }
 
     private func save() {
@@ -109,7 +121,7 @@ struct EditorView: View {
         store.editingModuleID = nil
         loadedID = nil
         name = ""
-        result = nil
+        runner.stop()
         selection = "modules"
     }
 }
