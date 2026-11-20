@@ -19,12 +19,16 @@ final class ModuleStore: ObservableObject {
     @Published var editingModuleID: UUID? = nil
 
     private let storageKey = "xcontainer.modules.v1"
+    private let seededKey = "xcontainer.seeded.v1"
 
     init() {
-        load()
-        if modules.isEmpty {
+        let hadSavedData = load()
+        // Only seed examples on very first launch. An empty array is a valid
+        // saved state (user hit Reset) and must stay empty across restarts.
+        if !hadSavedData {
             modules = Self.examples
             save()
+            UserDefaults.standard.set(true, forKey: seededKey)
         }
     }
 
@@ -78,11 +82,14 @@ final class ModuleStore: ObservableObject {
     }
 
     // MARK: Persistence
-    private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
+    @discardableResult
+    private func load() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return false }
         if let decoded = try? JSONDecoder().decode([Module].self, from: data) {
             modules = decoded
+            return true
         }
+        return false
     }
 
     private func save() {

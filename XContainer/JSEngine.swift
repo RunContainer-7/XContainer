@@ -19,6 +19,11 @@ private final class LogBox {
 final class JSEngine {
     static func run(_ code: String) -> JSRunResult {
         var res = JSRunResult()
+        // Empty editor should not produce a confusing "undefined" result.
+        if code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            res.result = "(no output)"
+            return res
+        }
         let box = LogBox()
         var handlerError: String? = nil
 

@@ -48,6 +48,14 @@ struct ContentView: View {
         }
         .environmentObject(store)
         .preferredColorScheme(.dark)
+        .onChange(of: store.modules.filter { $0.isPinned }.map(\.id)) { _, _ in
+            // If the selected pinned tab was unpinned/deleted, fall back to Modules.
+            if selection.hasPrefix("panel-") {
+                let idString = String(selection.dropFirst("panel-".count))
+                let stillPinned = store.modules.contains(where: { $0.id.uuidString == idString && $0.isPinned })
+                if !stillPinned { selection = "modules" }
+            }
+        }
     }
 }
 
@@ -191,6 +199,8 @@ struct ModulesView: View {
                 }
             }
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
 
             if !lastRunText.isEmpty {
                 Text(lastRunText)

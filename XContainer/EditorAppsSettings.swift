@@ -31,7 +31,7 @@ struct EditorView: View {
                     .padding(8)
                     .background(Color(white: 0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
 
                 Toggle("Pin as tab panel on Save", isOn: $pinAsPanel)
@@ -134,6 +134,8 @@ struct AppsView: View {
             .padding(.vertical, 4)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
         .navigationTitle("Recommended Apps")
         .background(Color.black.ignoresSafeArea())
     }
@@ -162,6 +164,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             } header: { Text("Storage & Engine") }
         }
+        .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
     }
 }
