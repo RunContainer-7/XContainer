@@ -42,6 +42,16 @@ struct EditorView: View {
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
 
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        snippetButton("log", insert: "console.log(\"hello\");\n")
+                        snippetButton("loop", insert: "for (let i = 0; i < 5; i++) { console.log(i); }\n")
+                        snippetButton("func", insert: "function name() {\n  return 1;\n}\n")
+                        snippetButton("html", insert: "\"<div style='font-family:-apple-system;padding:20px;text-align:center'><h1>Hi</h1></div>\";\n")
+                        snippetButton("store", insert: "localStorage.setItem(\"key\", \"value\");\n")
+                    }
+                }
+
                 Toggle("Pin as tab panel on Save", isOn: $pinAsPanel)
                     .font(.caption)
 
@@ -105,22 +115,30 @@ struct EditorView: View {
         runner.stop()
     }
 
+    private func snippetButton(_ label: String, insert: String) -> some View {
+        Button(label) { code += insert }
+            .font(.caption)
+            .buttonStyle(.bordered)
+    }
+
     private func save() {
         let clean = name.trimmingCharacters(in: .whitespaces)
         guard !clean.isEmpty else { return }
+        // Empty code is allowed but confirm-ish: save a placeholder comment
+        // so detail/panel never shows a blank confusing screen.
+        let finalCode = code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "// empty module\nconsole.log(\"empty module\");" : code
         if let id = loadedID, store.module(withID: id) != nil {
-            store.update(id: id, name: clean, code: code)
-            if pinAsPanel {
-                if let m = store.module(withID: id) { store.setPinned(m, pinned: true) }
-            }
+            store.update(id: id, name: clean, code: finalCode)
+            if let m = store.module(withID: id) { store.setPinned(m, pinned: pinAsPanel) }
         } else {
-            let m = store.add(name: clean, code: code, pinned: pinAsPanel)
+            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel)
             loadedID = m.id
             store.editingModuleID = m.id
         }
         store.editingModuleID = nil
         loadedID = nil
         name = ""
+        code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
         runner.stop()
         selection = "modules"
     }
@@ -169,6 +187,27 @@ struct SettingsView: View {
                 Button("Restore example modules") { store.restoreExamples() }
                 Button("Reset all modules", role: .destructive) { store.reset() }
             } header: { Text("Modules") }
+
+            Section {
+                if store.history.isEmpty {
+                    Text("No runs yet. Run anything and it shows up here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.history.prefix(20)) { h in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(h.moduleName).font(.caption.bold())
+                                Spacer()
+                                Text(h.at, style: .time).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Text(h.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            if h.hadError { Text("error").font(.caption2).foregroundStyle(.red) }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    Button("Clear history", role: .destructive) { store.clearHistory() }
+                }
+            } header: { Text("Run history") }
 
             Section {
                 Text("Modules are stored on-device (UserDefaults). Code runs locally with Apple's JavaScriptCore — no server.")

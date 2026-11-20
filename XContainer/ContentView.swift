@@ -23,6 +23,12 @@ struct ContentView: View {
             .tag("modules")
 
             NavigationStack {
+                TemplatesView(selection: $selection)
+            }
+            .tabItem { Label("Templates", systemImage: "doc.on.doc") }
+            .tag("templates")
+
+            NavigationStack {
                 EditorView(selection: $selection)
             }
             .tabItem { Label("Editor", systemImage: "pencil") }
@@ -80,6 +86,9 @@ struct HomeView: View {
 
                 navCard(title: "Open Modules", sub: "View and manage your modules.", icon: "square.stack") {
                     selection = "modules"
+                }
+                navCard(title: "Browse Templates", sub: "Copy a starter, add it, use it.", icon: "doc.on.doc") {
+                    selection = "templates"
                 }
                 navCard(title: "Create Script", sub: "Start a new module with custom code.", icon: "pencil") {
                     store.editingModuleID = nil
@@ -143,23 +152,142 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Modules list
+// MARK: - Templates gallery: copy -> Add module -> Use
+struct TemplatesView: View {
+    @EnvironmentObject var store: ModuleStore
+    @Binding var selection: String
+    @State private var query = ""
+    @State private var category = "All"
+    @State private var addedName = ""
+
+    var categories: [String] {
+        var s = Set(ModuleStore.templates.map { $0.category })
+        s.insert("All")
+        return ["All"] + s.sorted()
+    }
+
+    var filtered: [Template] {
+        ModuleStore.templates.filter { t in
+            (category == "All" || t.category == category)
+            && (query.isEmpty || t.name.localizedCaseInsensitiveContains(query) || t.blurb.localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    var body: some View {
+        VStack {
+            Picker("Category", selection: $category) {
+                ForEach(categories, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            if !addedName.isEmpty {
+                Text("Added \"" + addedName + "\" — find it in Modules.")
+                    .font(.caption)
+                    .padding(8)
+                    .background(Color.green.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal)
+            }
+            List(filtered) { t in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(t.name).font(.headline)
+                        Spacer()
+                        Text(t.category).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(t.blurb).font(.caption).foregroundStyle(.secondary)
+                    Text(t.code)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    HStack {
+                        Spacer()
+                        Button("Copy") {
+                            UIPasteboard.general.string = t.code
+                            addedName = ""
+                        }.buttonStyle(.bordered)
+                        Button("Use template") {
+                            let m = store.useTemplate(t)
+                            addedName = m.name
+                            store.editingModuleID = m.id
+                        }.buttonStyle(.borderedProminent)
+                        Button("Use & Open") {
+                            let m = store.useTemplate(t)
+                            addedName = ""
+                            store.editingModuleID = m.id
+                            selection = "editor"
+                        }.buttonStyle(.bordered)
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 4)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+        }
+        .searchable(text: $query, prompt: "Search templates")
+        .navigationTitle("Templates")
+        .background(Color.black.ignoresSafeArea())
+    }
+}
+
+// MARK: - Modules list (search + sort + safe run + file export)
 struct ModulesView: View {
     @EnvironmentObject var store: ModuleStore
     @Binding var selection: String
     @State private var lastRunText = ""
     @State private var lastRunError = ""
     @State private var showImporter = false
+    @State private var showExporter = false
+    @State private var exportURL: URL? = nil
+    @State private var query = ""
+    @State private var sortBy = "Recent"
+    @StateObject private var quickRunner = SafeRunner()
+    @State private var quickName = ""
+
+    var filtered: [Module] {
+        var list = store.modules
+        if !query.isEmpty {
+            list = list.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.code.localizedCaseInsensitiveContains(query) }
+        }
+        switch sortBy {
+        case "Name": list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case "Oldest": list.sort { $0.createdAt < $1.createdAt }
+        default: list.sort { $0.createdAt > $1.createdAt }
+        }
+        return list
+    }
 
     var body: some View {
         VStack {
+            Picker("Sort", selection: $sortBy) {
+                Text("Recent").tag("Recent")
+                Text("Name").tag("Name")
+                Text("Oldest").tag("Oldest")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
             if store.modules.isEmpty {
-                Text("No modules yet. Create one from Home or tap + below.")
+                Text("No modules yet. Grab one from Templates or tap + below.")
                     .foregroundStyle(.secondary)
                     .padding()
             }
+            if quickRunner.isRunning {
+                HStack {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Running " + quickName + "…")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Stop") { quickRunner.stop() }.font(.caption)
+                }
+                .padding(.horizontal)
+            } else if let r = quickRunner.result {
+                RunOutputView(result: r)
+                    .padding(.horizontal)
+            }
             List {
-                ForEach(store.modules) { mod in
+                ForEach(filtered) { mod in
                     VStack(alignment: .leading, spacing: 8) {
                         NavigationLink {
                             ModuleDetailView(moduleID: mod.id)
@@ -194,7 +322,9 @@ struct ModulesView: View {
                             }
                             .buttonStyle(.bordered)
                             Button("Duplicate") {
-                                store.duplicate(mod)
+                                let c = store.duplicate(mod)
+                                lastRunError = ""
+                                lastRunText = "Duplicated as \"" + c.name + "\""
                             }
                             .buttonStyle(.bordered)
                             Button("Copy") {
@@ -204,6 +334,8 @@ struct ModulesView: View {
                             }
                             .buttonStyle(.bordered)
                             ShareLink("Share", item: mod.code)
+                                .buttonStyle(.bordered)
+                            ShareLink("File", item: moduleFileURL(mod))
                                 .buttonStyle(.bordered)
                         }
                         .font(.caption)
@@ -238,11 +370,17 @@ struct ModulesView: View {
             }
         }
         .navigationTitle("Modules")
+        .searchable(text: $query, prompt: "Search modules")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
                     showImporter = true
                 } label: { Image(systemName: "square.and.arrow.down") }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    exportAll()
+                } label: { Image(systemName: "square.and.arrow.up") }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -252,29 +390,69 @@ struct ModulesView: View {
             }
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .javaScript]) { res in
-            if let url = try? res.get() {
-                if let text = try? String(contentsOf: url, encoding: .utf8) {
+            do {
+                let url = try res.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty {
                     let base = url.deletingPathExtension().lastPathComponent
-                    store.importModule(name: base.isEmpty ? "Imported module" : base, code: text)
+                    let m = store.importModule(name: base.isEmpty ? "Imported module" : base, code: text)
+                    lastRunError = ""
+                    lastRunText = "Imported \"" + m.name + "\""
+                } else {
+                    lastRunError = "Could not read that file (empty or not UTF-8)."
                 }
+            } catch {
+                lastRunError = "Import failed: " + error.localizedDescription
+            }
+        }
+        .fileExporter(isPresented: $showExporter, document: ExportDoc(url: exportURL), contentType: .json, defaultFilename: "xcontainer-modules.json") { _ in }
+        .onChange(of: quickRunner.result) { _, _ in
+            if let r = quickRunner.result {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: quickName, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
             }
         }
         .background(Color.black.ignoresSafeArea())
     }
 
+    private func moduleFileURL(_ mod: Module) -> URL {
+        let safe = mod.name.replacingOccurrences(of: "/", with: "-").prefix(40)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(String(safe) + ".js")
+        try? mod.code.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    private func exportAll() {
+        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        if let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
+            try? data.write(to: url)
+            exportURL = url
+            showExporter = true
+        }
+    }
+
     private func quickRun(_ mod: Module) {
-        let r = JSEngine.run(mod.code)
+        // Off-main-thread so a looping module never freezes the list.
+        quickName = mod.name
         lastRunError = ""
         lastRunText = ""
-        if let e = r.error, !e.isEmpty {
-            lastRunError = "\(mod.name): \(e)"
-        } else {
-            var out = mod.name + ":"
-            if !r.logs.isEmpty { out += "\n" + r.logs.joined(separator: "\n") }
-            if !r.result.isEmpty { out += "\n=> " + r.result }
-            if r.logs.isEmpty && r.result.isEmpty { out += "\n(no output)" }
-            lastRunText = out
+        quickRunner.start(mod.code)
+    }
+}
+
+// Wrapper so Export-All can use .fileExporter.
+struct ExportDoc: FileDocument {
+    var url: URL?
+    static var readableContentTypes: [UTType] { [.json] }
+    init(url: URL?) { self.url = url }
+    init(configuration: ReadConfiguration) throws { self.url = nil }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        if let url, let data = try? Data(contentsOf: url) {
+            return FileWrapper(regularFileWithContents: data)
         }
+        return FileWrapper(regularFileWithContents: Data("{}".utf8))
     }
 }
 
@@ -316,14 +494,30 @@ final class SafeRunner: ObservableObject {
 func looksLikeHTML(_ s: String) -> Bool {
     let lower = s.lowercased()
     guard s.contains("<") && s.contains(">") else { return false }
-    return lower.contains("<html") || lower.contains("<div") || lower.contains("<button") || lower.contains("<h1") || lower.contains("<p") || lower.contains("<style")
+    let tags = ["<html", "<div", "<button", "<h1", "<h2", "<h3", "<p", "<style", "<span", "<ul", "<ol", "<li", "<input", "<table", "<img", "<a ", "<form"]
+    return tags.contains(where: { lower.contains($0) })
 }
 
 struct HTMLView: UIViewRepresentable {
     let html: String
-    func makeUIView(context: Context) -> WKWebView { WKWebView() }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> WKWebView {
+        let v = WKWebView()
+        v.isOpaque = false
+        v.backgroundColor = .clear
+        v.scrollView.backgroundColor = .clear
+        return v
+    }
     func updateUIView(_ view: WKWebView, context: Context) {
-        view.loadHTMLString(html, baseURL: nil)
+        // Don't reload on every SwiftUI refresh — that would wipe
+        // scroll position / input text in the interactive panel.
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            view.loadHTMLString(html, baseURL: nil)
+        }
+    }
+    final class Coordinator {
+        var lastHTML: String = ""
     }
 }
 
@@ -421,10 +615,16 @@ struct ModuleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(Color.black.ignoresSafeArea())
         .onAppear {
-            if let m = module { runner.start(m.code) }
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
         }
         .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module { runner.start(m.code) }
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: runner.result) { _, _ in
+            if let r = runner.result, let m = module {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+            }
         }
     }
 }
@@ -465,10 +665,16 @@ struct ModulePanelView: View {
         .navigationTitle(module?.name ?? "Panel")
         .background(Color.black.ignoresSafeArea())
         .onAppear {
-            if let m = module { runner.start(m.code) }
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
         }
         .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module { runner.start(m.code) }
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: runner.result) { _, _ in
+            if let r = runner.result, let m = module {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+            }
         }
     }
 }

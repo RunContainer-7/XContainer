@@ -14,7 +14,26 @@ This replaces the old Expo/React Native prototype with the real Swift app.
 - **Apps**: recommended sideloading-related apps (same idea as before).
 - **Settings**: about, restore examples, reset all.
 
-Ships with 3 examples: **Calculator**, **Mini Assistant** (hardcoded replies), **Dice Game** (tap Re-run to roll again).
+Ships with 4 examples: **Calculator**, **Mini Assistant**, **Counter App** (interactive HTML tab), **Dice Game**.
+
+## Templates (copy → Add module → Use)
+
+New **Templates** tab with 13 starters in 4 groups:
+
+- **Mini-apps**: Notes, Todos, Timer, Tap Counter UI
+- **Games**: Dice Roller, Guess Number, Rock Paper Scissors
+- **Tools**: Calculator+, JSON Formatter, Base64 Tool, Password Generator
+- **HTML UI**: Dark Card UI, Form UI (return HTML from JS to render an interactive panel)
+
+Each card has **Copy** (copies code), **Use template** (adds it to Modules), **Use & Open** (adds + jumps to Editor). Search + category filter included.
+
+## What's new in this update
+
+- **Modules**: search bar, Recent/Name/Oldest sort, safe background Run + Stop (no UI freeze on loops), **Share** (text) + **File** (.js export per module), **Export-All** button (JSON backup), fixed file import (security-scoped URLs + error messages).
+- **Editor**: one-tap snippets (log / loop / func / html / store), empty-code guard, pin state syncs correctly on save.
+- **Engine**: `console.error/warn/info`, `alert/prompt`, `setTimeout(fn, ms)` polyfill, `const console/localStorage` so user code can't clobber them.
+- **Panels**: HTML detector covers more tags, WKWebView only reloads on new HTML (keeps scroll/input), empty code doesn't auto-run.
+- **Settings → Run history**: last 100 runs with time + error flag, Clear button.
 
 ## Project layout
 

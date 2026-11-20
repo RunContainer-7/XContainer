@@ -2,7 +2,7 @@ import Foundation
 import JavaScriptCore
 
 // Result of running one script.
-struct JSRunResult {
+struct JSRunResult: Equatable {
     var logs: [String] = []
     var result: String = ""
     var error: String? = nil
@@ -59,10 +59,14 @@ final class JSEngine {
             d.removeValue(forKey: k)
             UserDefaults.standard.set(d, forKey: storageKey)
         }
+        let iosSleep: @convention(block) (Double) -> Void = { ms in
+            if ms > 0 { Thread.sleep(forTimeInterval: min(ms / 1000.0, 3.0)) }
+        }
         ctx.setObject(iosGet, forKeyedSubscript: "iosGet" as NSString)
         ctx.setObject(iosHas, forKeyedSubscript: "iosHas" as NSString)
         ctx.setObject(iosSet, forKeyedSubscript: "iosSet" as NSString)
         ctx.setObject(iosRemove, forKeyedSubscript: "iosRemove" as NSString)
+        ctx.setObject(iosSleep, forKeyedSubscript: "iosSleep" as NSString)
         ctx.evaluateScript("""
         function __fmt(v) {
           if (v === undefined) return "undefined";
@@ -71,9 +75,22 @@ final class JSEngine {
           return String(v);
         }
         function log() { iosLog(Array.from(arguments).map(__fmt).join(" ")); }
-        var console = { log: log };
+        const console = { log: log, info: log, warn: log, error: log, debug: log };
         function print() { log.apply(null, arguments); }
-        var localStorage = {
+        function alert(msg) { log("ALERT: " + __fmt(msg)); }
+        function prompt(msg, def) { log("PROMPT: " + __fmt(msg)); return def === undefined ? "" : String(def); }
+        // Synchronous timer polyfill: runs the callback after a short blocking
+        // sleep so template code using setTimeout still works in order.
+        // (No background intervals on iOS JSContext — use Re-run for loops.)
+        var __timerId = 0;
+        function setTimeout(fn, ms) {
+          __timerId += 1;
+          try { iosSleep(Number(ms) || 0); } catch(e) {}
+          try { if (typeof fn === "function") fn(); else eval(fn); } catch(e) { throw e; }
+          return __timerId;
+        }
+        function clearTimeout(id) {}
+        const localStorage = {
           getItem: function(k) { k = String(k); return iosHas(k) ? iosGet(k) : null; },
           setItem: function(k, v) { iosSet(String(k), String(v)); },
           removeItem: function(k) { iosRemove(String(k)); }
