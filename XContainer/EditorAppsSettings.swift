@@ -25,7 +25,8 @@ struct EditorView: View {
 
                 Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $code)
-                    .font(.body.monospaced())
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
                     .frame(minHeight: 220)
                     .padding(8)
                     .background(Color(white: 0.08))
@@ -71,7 +72,7 @@ struct EditorView: View {
         .navigationTitle("Editor")
         .background(Color.black.ignoresSafeArea())
         .onAppear(perform: loadIfNeeded)
-        .onChange(of: store.editingModuleID) { loadIfNeeded() }
+        .onChange(of: store.editingModuleID) { _, _ in loadIfNeeded() }
     }
 
     private func loadIfNeeded() {
@@ -82,12 +83,12 @@ struct EditorView: View {
             name = m.name
             code = m.code
             pinAsPanel = m.isPinned
-        } else if target == nil && loadedID != nil {
-            // keep current text when starting fresh from Home +
-            // (Home already cleared editingModuleID)
-            if name.isEmpty && code.isEmpty {
-                code = "// write your script here"
-            }
+        } else {
+            // Fresh script (Home -> Create, Modules -> +, or after Save).
+            // Always reset so we never show the previous module's text.
+            name = ""
+            code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+            pinAsPanel = true
         }
         result = nil
     }

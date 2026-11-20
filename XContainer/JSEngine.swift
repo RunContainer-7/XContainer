@@ -12,10 +12,15 @@ struct JSRunResult {
 
 // Real JS engine on iOS. Supports console.log(...) / log(...) / print(...)
 // and returns the completion value of the script.
+private final class LogBox {
+    var lines: [String] = []
+}
+
 final class JSEngine {
     static func run(_ code: String) -> JSRunResult {
-        var logs: [String] = []
         var res = JSRunResult()
+        let box = LogBox()
+        var handlerError: String? = nil
 
         guard let ctx = JSContext() else {
             res.error = "Could not create JS engine"
@@ -24,7 +29,7 @@ final class JSEngine {
 
         // console.log("a", 1) -> one line "a 1"
         let appendLog: @convention(block) (String) -> Void = { msg in
-            logs.append(msg)
+            box.lines.append(msg)
         }
         ctx.setObject(appendLog, forKeyedSubscript: "iosLog" as NSString)
         ctx.evaluateScript("""
@@ -41,22 +46,23 @@ final class JSEngine {
 
         ctx.exceptionHandler = { _, exc in
             if let e = exc?.toString(), !e.isEmpty {
-                res.error = e
+                handlerError = e
             }
         }
 
         let value = ctx.evaluateScript(code)
 
         if let exc = ctx.exception?.toString(), !exc.isEmpty {
-            res.error = exc
+            handlerError = exc
             ctx.exception = nil
         }
 
-        res.logs = logs
+        res.error = handlerError
+        res.logs = box.lines
         if let v = value, !v.isUndefined {
             let s = v.toString() ?? ""
             // Hide bare "undefined" when there are already logs.
-            if s != "undefined" || logs.isEmpty {
+            if s != "undefined" || box.lines.isEmpty {
                 res.result = s
             }
         }

@@ -163,7 +163,7 @@ struct ModulesView: View {
                                     }
                                 }
                                 Text(mod.code)
-                                    .font(.caption.monospaced())
+                                    .font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
@@ -194,7 +194,7 @@ struct ModulesView: View {
 
             if !lastRunText.isEmpty {
                 Text(lastRunText)
-                    .font(.caption.monospaced())
+                    .font(.system(.caption, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(Color.blue.opacity(0.15))
@@ -203,7 +203,7 @@ struct ModulesView: View {
             }
             if !lastRunError.isEmpty {
                 Text(lastRunError)
-                    .font(.caption.monospaced())
+                    .font(.system(.caption, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(Color.red.opacity(0.15))
@@ -248,7 +248,7 @@ struct RunOutputView: View {
             if !result.logs.isEmpty {
                 Text("Console").font(.caption.bold()).foregroundStyle(.secondary)
                 Text(result.logs.joined(separator: "\n"))
-                    .font(.callout.monospaced())
+                    .font(.system(.callout, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(Color.blue.opacity(0.12))
@@ -257,7 +257,7 @@ struct RunOutputView: View {
             if !result.result.isEmpty {
                 Text("Return value").font(.caption.bold()).foregroundStyle(.secondary)
                 Text(result.result)
-                    .font(.callout.monospaced())
+                    .font(.system(.callout, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(Color.green.opacity(0.10))
@@ -266,7 +266,7 @@ struct RunOutputView: View {
             if let e = result.error, !e.isEmpty {
                 Text("Error").font(.caption.bold()).foregroundStyle(.red)
                 Text(e)
-                    .font(.callout.monospaced())
+                    .font(.system(.callout, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
                     .background(Color.red.opacity(0.12))
@@ -290,7 +290,7 @@ struct ModuleDetailView: View {
                 if let m = module {
                     Text(m.name).font(.title2.bold())
                     Text(m.code)
-                        .font(.caption.monospaced())
+                        .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
@@ -321,8 +321,15 @@ struct ModuleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(Color.black.ignoresSafeArea())
         .onAppear {
-            if let m = module, result == nil {
+            if let m = module {
                 result = JSEngine.run(m.code)
+            }
+        }
+        .onChange(of: module?.code ?? "") { _, _ in
+            if let m = module {
+                result = JSEngine.run(m.code)
+            } else {
+                result = nil
             }
         }
     }
@@ -355,6 +362,9 @@ struct ModulePanelView: View {
         .navigationTitle(module?.name ?? "Panel")
         .background(Color.black.ignoresSafeArea())
         .onAppear {
+            if let m = module { result = JSEngine.run(m.code) }
+        }
+        .onChange(of: module?.code ?? "") { _, _ in
             if let m = module { result = JSEngine.run(m.code) }
         }
     }
