@@ -18,11 +18,11 @@ Ships with 4 examples: **Calculator**, **Mini Assistant**, **Counter App** (inte
 
 ## Templates (copy → Add module → Use)
 
-New **Templates** tab with 13 starters in 4 groups:
+New **Templates** tab with 22 starters in 4 groups:
 
-- **Mini-apps**: Notes, Todos, Timer, Tap Counter UI
-- **Games**: Dice Roller, Guess Number, Rock Paper Scissors
-- **Tools**: Calculator+, JSON Formatter, Base64 Tool, Password Generator
+- **Mini-apps**: Notes, Todos, Timer, Tap Counter UI, Expense Tracker, Habit Tracker, Pomodoro
+- **Games**: Dice Roller, Guess Number, Rock Paper Scissors, Tap Dash, Snake, Memory Match
+- **Tools**: Calculator+, JSON Formatter, Base64 Tool, Password Generator, Markdown Notes, Unit Converter, Weather Now (live fetch)
 - **HTML UI**: Dark Card UI, Form UI (return HTML from JS to render an interactive panel)
 
 Each card has **Copy** (copies code), **Use template** (adds it to Modules), **Use & Open** (adds + jumps to Editor). Search + category filter included.
@@ -31,7 +31,7 @@ Each card has **Copy** (copies code), **Use template** (adds it to Modules), **U
 
 - **Modules**: search bar, Recent/Name/Oldest sort, safe background Run + Stop (no UI freeze on loops), **Share** (text) + **File** (.js export per module), **Export-All** button (JSON backup), fixed file import (security-scoped URLs + error messages).
 - **Editor**: one-tap snippets (log / loop / func / html / store), empty-code guard, pin state syncs correctly on save.
-- **Engine**: `console.error/warn/info`, `alert/prompt`, `setTimeout(fn, ms)` polyfill, `const console/localStorage` so user code can't clobber them.
+- **Engine**: `console.error/warn/info`, `alert/prompt`, `setTimeout/setInterval` polyfill, `fetch(url)` (sync, 12s timeout), `btoa/atob`, `const console/localStorage` so user code can't clobber them. Errors show line numbers, logs capped at 200 lines, 8s run timeout + Stop button so loops never freeze the list.
 - **Panels**: HTML detector covers more tags, WKWebView only reloads on new HTML (keeps scroll/input), empty code doesn't auto-run.
 - **Settings → Run history**: last 100 runs with time + error flag, Clear button.
 

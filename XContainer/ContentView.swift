@@ -78,11 +78,9 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("XContainer")
                     .font(.largeTitle.bold())
-                Text("A small container for your scripts and modules.")
+                Text("Run scripts, pin panels, play games — all on-device.")
                     .foregroundStyle(.secondary)
-                Text("Modules: \(store.modules.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HomeStatsView()
 
                 navCard(title: "Open Modules", sub: "View and manage your modules.", icon: "square.stack") {
                     selection = "modules"
@@ -149,6 +147,41 @@ struct HomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct HomeStatsView: View {
+    @EnvironmentObject var store: ModuleStore
+    var body: some View {
+        let s = store.stats()
+        HStack(spacing: 10) {
+            statBox(String(s.total), label: "Modules")
+            statBox(String(s.pinned), label: "Panels")
+            statBox(String(s.runs), label: "Runs")
+            statBox(String(s.errors), label: "Errors")
+        }
+        if let last = store.history.first {
+            HStack {
+                Image(systemName: last.hadError ? "xmark.circle" : "checkmark.circle")
+                    .foregroundStyle(last.hadError ? .red : .green)
+                Text(last.moduleName + " — " + last.summary)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(Color(white: 0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+    private func statBox(_ n: String, label: String) -> some View {
+        VStack {
+            Text(n).font(.title2.bold())
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(10)
+        .background(Color(white: 0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -462,7 +495,7 @@ final class SafeRunner: ObservableObject {
     @Published var isRunning = false
     private var generation = 0
 
-    func start(_ code: String, timeout: Double = 5) {
+    func start(_ code: String, timeout: Double = 8) {
         generation += 1
         let g = generation
         isRunning = true

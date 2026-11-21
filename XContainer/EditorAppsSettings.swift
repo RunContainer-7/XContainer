@@ -49,19 +49,25 @@ struct EditorView: View {
                         snippetButton("func", insert: "function name() {\n  return 1;\n}\n")
                         snippetButton("html", insert: "\"<div style='font-family:-apple-system;padding:20px;text-align:center'><h1>Hi</h1></div>\";\n")
                         snippetButton("store", insert: "localStorage.setItem(\"key\", \"value\");\n")
+                        snippetButton("fetch", insert: "let r = fetch(\"https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74&current=temperature_2m\");\nconsole.log(r.text.slice(0,120));\n")
                     }
                 }
 
                 Toggle("Pin as tab panel on Save", isOn: $pinAsPanel)
                     .font(.caption)
 
+                if let warn = store.validate(code: code) {
+                    Text(warn).font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("Looks valid — ready to run.").font(.caption).foregroundStyle(.green)
+                }
                 HStack {
                     Button(runner.isRunning ? "Running…" : "Run") {
-                        runner.start(code)
+                        if store.validate(code: code) == nil { runner.start(code) }
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
-                    .disabled(runner.isRunning)
+                    .disabled(runner.isRunning || store.validate(code: code) != nil)
                     if runner.isRunning {
                         Button("Stop") { runner.stop() }
                             .buttonStyle(.bordered)
@@ -174,6 +180,7 @@ struct AppsView: View {
 // MARK: - Settings
 struct SettingsView: View {
     @EnvironmentObject var store: ModuleStore
+    @State private var selfTest = ""
 
     var body: some View {
         List {
@@ -213,6 +220,10 @@ struct SettingsView: View {
                 Text("Modules are stored on-device (UserDefaults). Code runs locally with Apple's JavaScriptCore — no server.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Run engine self-test") { selfTest = JSEngine.selfTest() }
+                if !selfTest.isEmpty {
+                    Text(selfTest).font(.caption2).foregroundStyle(.secondary)
+                }
             } header: { Text("Storage & Engine") }
         }
         .scrollContentBackground(.hidden)
