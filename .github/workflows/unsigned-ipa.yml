@@ -29,6 +29,7 @@ jobs:
           rm -rf build
           # NOTE: plain `build` (not `archive`) on purpose — this repo has no
           # shared .xcscheme, and `archive` + `-archivePath` requires `-scheme`.
+          set -o pipefail
           xcodebuild \
             -project XContainer.xcodeproj \
             -target XContainer \
@@ -39,7 +40,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee build.log
 
       - name: Package unsigned IPA
         run: |
@@ -58,3 +59,11 @@ jobs:
           name: XContainer-unsigned-ipa
           path: XContainer-unsigned.ipa
           if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
