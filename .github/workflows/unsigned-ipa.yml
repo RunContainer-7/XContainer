@@ -23,6 +23,16 @@ jobs:
       - name: Show project targets
         run: xcodebuild -list -project XContainer.xcodeproj
 
+      - name: Debug parse check (goes into build.log)
+        run: |
+          rm -f build.log
+          md5sum XContainer/*.swift | tee -a build.log
+          head -8 XContainer/ModuleStore.swift | tee -a build.log
+          for f in XContainer/*.swift; do
+            echo "=== PARSE $f ===" | tee -a build.log
+            xcrun swiftc -frontend -parse "$f" >> build.log 2>&1 || echo "PARSE-FAILED: $f" | tee -a build.log
+          done
+
       - name: Build (unsigned)
         run: |
           set -e
@@ -40,7 +50,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee build.log
+            AD_HOC_CODE_SIGNING_ALLOWED=YES 2>&1 | tee -a build.log
 
       - name: Package unsigned IPA
         run: |
