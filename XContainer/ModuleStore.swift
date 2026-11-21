@@ -505,7 +505,7 @@ final class ModuleStore: ObservableObject {
               function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
               let h = esc(md);
               h = h.replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>");
-              h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\*(.+?)\*/g, "<i>$1</i>").replace(/`(.+?)`/g, "<code>$1</code>");
+              var bpts = h.split("**"); if (bpts.length >= 3) { var nh = bpts[0]; for (var bi = 1; bi < bpts.length; bi++) { nh += (bi % 2 === 1 ? "<b>" : "</b>") + bpts[bi]; } h = nh; } h = h.replace(/`(.+?)`/g, "<code>$1</code>");
               h = h.replace(/^&gt; (.*)$/gm, "<blockquote>$1</blockquote>").replace(/^- (.*)$/gm, "<li>$1</li>");
               console.log("Rendered " + md.length + " chars");
               "<div style='font-family:-apple-system;background:#111;color:#fff;padding:20px;border-radius:16px'>" + h + "</div>";

@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 // ===== XContainer/ModuleStore.swift =====
+
 // MARK: - Model
 // A user script. When isPinned == true it also appears as its own tab/panel.
 struct Module: Identifiable, Codable, Hashable {
@@ -510,7 +511,7 @@ final class ModuleStore: ObservableObject {
               function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
               let h = esc(md);
               h = h.replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>");
-              h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\*(.+?)\*/g, "<i>$1</i>").replace(/`(.+?)`/g, "<code>$1</code>");
+              var bpts = h.split("**"); if (bpts.length >= 3) { var nh = bpts[0]; for (var bi = 1; bi < bpts.length; bi++) { nh += (bi % 2 === 1 ? "<b>" : "</b>") + bpts[bi]; } h = nh; } h = h.replace(/`(.+?)`/g, "<code>$1</code>");
               h = h.replace(/^&gt; (.*)$/gm, "<blockquote>$1</blockquote>").replace(/^- (.*)$/gm, "<li>$1</li>");
               console.log("Rendered " + md.length + " chars");
               "<div style='font-family:-apple-system;background:#111;color:#fff;padding:20px;border-radius:16px'>" + h + "</div>";
@@ -567,6 +568,7 @@ final class ModuleStore: ObservableObject {
 }
 
 // ===== XContainer/JSEngine.swift =====
+
 // Result of running one script.
 struct JSRunResult: Equatable {
     var logs: [String] = []
@@ -694,7 +696,7 @@ final class JSEngine {
         function setInterval(fn, ms) { return setTimeout(fn, ms); }
         function clearInterval(id) {}
         function btoa(s) { s = String(s); var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="; var out = "", i = 0; while (i < s.length) { var a = s.charCodeAt(i++), b = s.charCodeAt(i++), c = s.charCodeAt(i++); var x = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += chars[(x >> 18) & 63] + chars[(x >> 12) & 63] + (isNaN(b) ? "=" : chars[(x >> 6) & 63]) + (isNaN(c) ? "=" : chars[x & 63]); } return out; }
-        function atob(s) { s = String(s); var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="; var out = "", i = 0; s = s.replace(/[^A-Za-z0-9+\/=]/g, ""); while (i < s.length) { var e1 = chars.indexOf(s.charAt(i++)), e2 = chars.indexOf(s.charAt(i++)), e3 = chars.indexOf(s.charAt(i++)), e4 = chars.indexOf(s.charAt(i++)); var x = (e1 << 18) | (e2 << 12) | ((e3 & 63) << 6) | (e4 & 63); out += String.fromCharCode((x >> 16) & 255) + (e3 === 64 ? "" : String.fromCharCode((x >> 8) & 255)) + (e4 === 64 ? "" : String.fromCharCode(x & 255)); } return out; }
+        function atob(s) { s = String(s); var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="; var out = "", i = 0; s = s.replace(new RegExp("[^A-Za-z0-9+/=]", "g"), ""); while (i < s.length) { var e1 = chars.indexOf(s.charAt(i++)), e2 = chars.indexOf(s.charAt(i++)), e3 = chars.indexOf(s.charAt(i++)), e4 = chars.indexOf(s.charAt(i++)); var x = (e1 << 18) | (e2 << 12) | ((e3 & 63) << 6) | (e4 & 63); out += String.fromCharCode((x >> 16) & 255) + (e3 === 64 ? "" : String.fromCharCode((x >> 8) & 255)) + (e4 === 64 ? "" : String.fromCharCode(x & 255)); } return out; }
         function fetch(url) { var text = iosFetch(String(url)); return { text: text, json: function() { return JSON.parse(text); } }; }
         const localStorage = {
           getItem: function(k) { k = String(k); return iosHas(k) ? iosGet(k) : null; },
@@ -730,6 +732,7 @@ final class JSEngine {
 }
 
 // ===== XContainer/ContentView.swift =====
+
 // Root: 5 fixed tabs + one extra tab per pinned module ("panel in your tab").
 struct ContentView: View {
     @StateObject private var store = ModuleStore()
@@ -1569,6 +1572,7 @@ struct ModulePanelView: View {
 }
 
 // ===== XContainer/EditorAppsSettings.swift =====
+
 // MARK: - Editor: type code -> Run -> Save (+ optional Pin as tab)
 struct EditorView: View {
     @EnvironmentObject var store: ModuleStore
@@ -1830,6 +1834,7 @@ struct SettingsView: View {
 }
 
 // ===== XContainer/XContainerApp.swift =====
+
 @main
 struct XContainerApp: App {
     var body: some Scene {
