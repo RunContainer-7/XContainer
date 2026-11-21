@@ -23,17 +23,19 @@ jobs:
       - name: Show project targets
         run: xcodebuild -list -project XContainer.xcodeproj
 
-      - name: Archive (unsigned)
+      - name: Build (unsigned)
         run: |
           set -e
           rm -rf build
+          # NOTE: plain `build` (not `archive`) on purpose — this repo has no
+          # shared .xcscheme, and `archive` + `-archivePath` requires `-scheme`.
           xcodebuild \
             -project XContainer.xcodeproj \
             -target XContainer \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$PWD/build/XContainer.xcarchive" \
-            archive \
+            build \
+            CONFIGURATION_BUILD_DIR="$PWD/build/app" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -42,7 +44,7 @@ jobs:
       - name: Package unsigned IPA
         run: |
           set -e
-          APP_PATH="build/XContainer.xcarchive/Products/Applications/XContainer.app"
+          APP_PATH="build/app/XContainer.app"
           ls -la "$APP_PATH"
           rm -rf Payload XContainer-unsigned.ipa
           mkdir -p Payload
