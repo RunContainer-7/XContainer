@@ -62,8 +62,13 @@ No dependencies. Only `SwiftUI` + `JavaScriptCore` + `Foundation`.
 2. Copy the 5 `.swift` files from `XContainer/` into it (no extra setup — they only use system frameworks).
 3. Build as unsigned IPA, then sideload with your usual tool (AltStore / Sideloadly / LiveContainer flow) and show your friend.
 
-If your tool only accepts a single file: concatenate the 5 files in this order —
-`ModuleStore.swift`, `JSEngine.swift`, `ContentView.swift`, `EditorAppsSettings.swift`, `XContainerApp.swift` (the `@main` file last) — into one `.swift` file.
+If your tool only accepts a single file: use `BuildBox/XContainer-Combined.swift.txt` —
+rename it to `.swift` on your iPhone first. It is the same 5 files joined in order
+(`ModuleStore`, `JSEngine`, `ContentView`, `EditorAppsSettings`, `XContainerApp` last).
+
+> BuildBox fix (duplicate-type error): never import BOTH the `XContainer/` folder AND
+> the combined file into the same app — pick one. The `.txt` extension in this repo
+> stops auto-builders from compiling the same `JSRunResult` struct twice.
 
 ## Notes for sideloading
 

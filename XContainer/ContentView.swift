@@ -566,6 +566,20 @@ struct RunOutputView: View {
 }
 
 // MARK: - Module detail: tap a module -> see live output
+// Split into small views so plain `swiftc` builds (BuildBox) type-check fast.
+func runSummaryText(_ r: JSRunResult) -> String {
+    let logsText: String = r.logs.joined(separator: " ")
+    let parts: [String] = [logsText, r.result].filter { !$0.isEmpty }
+    let joined: String = parts.joined(separator: " | ")
+    if joined.isEmpty { return "(no output)" }
+    return String(joined.prefix(120))
+}
+
+func runHadError(_ r: JSRunResult) -> Bool {
+    guard let e = r.error else { return false }
+    return !e.isEmpty
+}
+
 struct ModuleDetailView: View {
     @EnvironmentObject var store: ModuleStore
     let moduleID: UUID
@@ -575,56 +589,77 @@ struct ModuleDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let m = module {
-                    Text(m.name).font(.title2.bold())
-                    Text(m.code)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(Color(white: 0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                    HStack {
-                        Button("Re-run") { runner.start(m.code) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(runner.isRunning)
-                        if runner.isRunning {
-                            Button("Stop") { runner.stop() }
-                                .buttonStyle(.bordered)
-                        }
-                        Button(m.isPinned ? "Unpin from Tabs" : "Pin to Tabs") {
-                            store.togglePin(m)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    if runner.isRunning {
-                        Text("Running… (Stop frees the app if it loops)").foregroundStyle(.secondary)
-                    } else if let r = runner.result {
-                        RunOutputView(result: r)
-                    }
-                } else {
-                    Text("This module was deleted.").foregroundStyle(.secondary)
-                }
-            }
-            .padding()
+            detailStack
+                .padding()
         }
         .navigationTitle("Module")
         .navigationBarTitleDisplayMode(.inline)
         .background(Color.black.ignoresSafeArea())
-        .onAppear {
-            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
-        }
-        .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
-        }
-        .onChange(of: runner.result) { _, _ in
-            if let r = runner.result, let m = module {
-                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
-                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+        .onAppear { autoRun() }
+        .onChange(of: module?.code ?? "") { _, _ in autoRun() }
+        .onChange(of: runner.result) { _, _ in recordCurrentRun() }
+    }
+
+    private func autoRun() {
+        guard let m = module else { return }
+        let trimmed = m.code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { runner.start(m.code) }
+    }
+
+    private func recordCurrentRun() {
+        guard let r = runner.result else { return }
+        guard let m = module else { return }
+        store.recordRun(moduleName: m.name, summary: runSummaryText(r), hadError: runHadError(r))
+    }
+
+    @ViewBuilder
+    private var detailStack: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let m = module {
+                detailHeader(m)
+                detailButtons(m)
+                detailStatus
+            } else {
+                Text("This module was deleted.").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func detailHeader(_ m: Module) -> some View {
+        Text(m.name).font(.title2.bold())
+        Text(m.code)
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color(white: 0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func detailButtons(_ m: Module) -> some View {
+        HStack {
+            Button("Re-run") { runner.start(m.code) }
+                .buttonStyle(.borderedProminent)
+                .disabled(runner.isRunning)
+            if runner.isRunning {
+                Button("Stop") { runner.stop() }
+                    .buttonStyle(.bordered)
+            }
+            Button(m.isPinned ? "Unpin from Tabs" : "Pin to Tabs") {
+                store.togglePin(m)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private var detailStatus: some View {
+        if runner.isRunning {
+            Text("Running… (Stop frees the app if it loops)").foregroundStyle(.secondary)
+        } else if let r = runner.result {
+            RunOutputView(result: r)
         }
     }
 }
@@ -639,42 +674,60 @@ struct ModulePanelView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let m = module {
-                    Text(m.name).font(.title2.bold())
-                    HStack {
-                        Button("Re-run") { runner.start(m.code) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(runner.isRunning)
-                        if runner.isRunning {
-                            Button("Stop") { runner.stop() }
-                                .buttonStyle(.bordered)
-                        }
-                    }
-                    if runner.isRunning {
-                        Text("Running…").foregroundStyle(.secondary)
-                    } else if let r = runner.result {
-                        RunOutputView(result: r)
-                    }
-                } else {
-                    Text("Unpinned or deleted.").foregroundStyle(.secondary)
-                }
-            }
-            .padding()
+            panelStack
+                .padding()
         }
         .navigationTitle(module?.name ?? "Panel")
         .background(Color.black.ignoresSafeArea())
-        .onAppear {
-            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
-        }
-        .onChange(of: module?.code ?? "") { _, _ in
-            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
-        }
-        .onChange(of: runner.result) { _, _ in
-            if let r = runner.result, let m = module {
-                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
-                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+        .onAppear { autoRun() }
+        .onChange(of: module?.code ?? "") { _, _ in autoRun() }
+        .onChange(of: runner.result) { _, _ in recordCurrentRun() }
+    }
+
+    private func autoRun() {
+        guard let m = module else { return }
+        let trimmed = m.code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { runner.start(m.code) }
+    }
+
+    private func recordCurrentRun() {
+        guard let r = runner.result else { return }
+        guard let m = module else { return }
+        store.recordRun(moduleName: m.name, summary: runSummaryText(r), hadError: runHadError(r))
+    }
+
+    @ViewBuilder
+    private var panelStack: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let m = module {
+                Text(m.name).font(.title2.bold())
+                panelButtons(m)
+                panelStatus
+            } else {
+                Text("Unpinned or deleted.").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func panelButtons(_ m: Module) -> some View {
+        HStack {
+            Button("Re-run") { runner.start(m.code) }
+                .buttonStyle(.borderedProminent)
+                .disabled(runner.isRunning)
+            if runner.isRunning {
+                Button("Stop") { runner.stop() }
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var panelStatus: some View {
+        if runner.isRunning {
+            Text("Running…").foregroundStyle(.secondary)
+        } else if let r = runner.result {
+            RunOutputView(result: r)
         }
     }
 }
