@@ -44,6 +44,7 @@ struct Module: Identifiable, Codable, Hashable {
         let trimmed = rawFolder.trimmingCharacters(in: .whitespacesAndNewlines)
         folder = trimmed.isEmpty ? "General" : String(trimmed.prefix(40))
     }
+}
 
 // MARK: - Template: copy -> add as module -> use
 struct Template: Identifiable, Hashable {
