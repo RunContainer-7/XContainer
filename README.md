@@ -18,11 +18,11 @@ Ships with 4 examples: **Calculator**, **Mini Assistant**, **Counter App** (inte
 
 ## Templates (copy → Add module → Use)
 
-New **Templates** tab with 22 starters in 4 groups:
+New **Templates** tab with 24 starters in 4 groups:
 
 - **Mini-apps**: Notes, Todos, Timer, Tap Counter UI, Expense Tracker, Habit Tracker, Pomodoro
 - **Games**: Dice Roller, Guess Number, Rock Paper Scissors, Tap Dash, Snake, Memory Match
-- **Tools**: Calculator+, JSON Formatter, Base64 Tool, Password Generator, Markdown Notes, Unit Converter, Weather Now (live fetch)
+- **Tools**: Calculator+, JSON Formatter, Base64 Tool, Password Generator, Markdown Notes, Unit Converter, Weather Now (live fetch), API Tester, JSON Inspector
 - **HTML UI**: Dark Card UI, Form UI (return HTML from JS to render an interactive panel)
 
 Each card has **Copy** (copies code), **Use template** (adds it to Modules), **Use & Open** (adds + jumps to Editor). Search + category filter included.

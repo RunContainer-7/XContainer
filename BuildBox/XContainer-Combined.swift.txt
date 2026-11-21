@@ -93,7 +93,11 @@ final class ModuleStore: ObservableObject {
     }
 
     func add(name: String, code: String, pinned: Bool) -> Module {
-        let m = Module(name: name, code: code, isPinned: pinned)
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeName = clean.isEmpty ? "Untitled module" : String(clean.prefix(80))
+        let safeCode = String(code.prefix(200_000))
+        if modules.count >= 500 { modules.removeFirst() }
+        let m = Module(name: safeName, code: safeCode, isPinned: pinned)
         modules.append(m)
         save()
         return m
@@ -481,6 +485,20 @@ final class ModuleStore: ObservableObject {
             Template(name: "Memory Match", category: "Games", blurb: "Flip pairs, timed.", pinByDefault: true, code: """
               console.log("Memory ready — open panel to play");
               `<meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:-apple-system;background:#000;color:#fff;margin:0;padding:16px;text-align:center}.b{background:#111;border-radius:16px;padding:14px;max-width:400px;margin:0 auto}.g{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.t{height:64px;border-radius:12px;border:1px solid #444;background:#222;font-size:26px;color:#fff}</style><div class='b'><div>Moves <b id='m'>0</b> • Pairs <b id='p'>0</b>/8</div><div class='g' id='g'></div><button onclick='build()' style='margin-top:12px;padding:12px;width:100%;border-radius:12px;border:0;background:#fff;font-weight:800'>Shuffle / Restart</button></div><script>var em=['🍎','🚀','🐶','⚽','🎧','🌙','🍕','🐠'];var deck=[],first=-1,moves=0,pairs=0,lock=false;function build(){deck=em.concat(em).sort(function(){return Math.random()-0.5});moves=0;pairs=0;first=-1;lock=false;document.getElementById('m').innerText='0';document.getElementById('p').innerText='0/8';var g=document.getElementById('g');g.innerHTML='';for(var i=0;i<16;i++){var b=document.createElement('button');b.className='t';b.innerText='?';b.id='t'+i;b.onclick=(function(i){return function(){flip(i)}})(i);g.appendChild(b)}}function flip(i){if(lock)return;var el=document.getElementById('t'+i);if(el.innerText!=='?')return;el.innerText=deck[i];if(first===-1){first=i;return}if(first===i)return;moves++;document.getElementById('m').innerText=moves;if(deck[first]===deck[i]){pairs++;document.getElementById('p').innerText=pairs+'/8';first=-1;if(pairs===8)setTimeout(function(){alert('You win in '+moves+' moves!')},300)}else{lock=true;var a=first,b2=i;setTimeout(function(){document.getElementById('t'+a).innerText='?';document.getElementById('t'+b2).innerText='?';first=-1;lock=false},700);first=-2}}build()</script>`;
+              """),
+            Template(name: "API Tester", category: "Tools", blurb: "GET any URL, inspect body.", pinByDefault: true, code: """
+              console.log("API Tester ready — open panel");
+              `<meta name='viewport' content='width=device-width,initial-scale=1'><style>body{font-family:-apple-system;background:#000;color:#fff;margin:0;padding:16px}.b{background:#111;border-radius:16px;padding:14px;max-width:480px;margin:0 auto}input{width:100%;box-sizing:border-box;padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#fff;margin:8px 0}button.go{width:100%;padding:12px;border-radius:12px;border:0;background:#fff;font-weight:800}pre{background:#000;border-radius:10px;padding:10px;overflow:auto;max-height:300px;font-size:12px}#st{color:#888;font-size:13px}</style><div class='b'><b>API Tester</b><div id='st'>Paste a URL, tap Send</div><input id='u' value='https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74&current=temperature_2m'/><button class='go' onclick='send()'>Send GET</button><pre id='o'>—</pre></div><script>function send(){var u=document.getElementById('u').value;var o=document.getElementById('o');var st=document.getElementById('st');o.innerText='Loading…';var t0=Date.now();fetch(u).then(function(r){st.innerText='HTTP '+r.status+' • '+(Date.now()-t0)+'ms';return r.text()}).then(function(t){try{o.innerText=JSON.stringify(JSON.parse(t),null,2).slice(0,4000)}catch(e){o.innerText=t.slice(0,4000)}}).catch(function(e){st.innerText='Error';o.innerText=String(e).slice(0,500)})}</script>`;
+              """),
+            Template(name: "JSON Inspector", category: "Tools", blurb: "Validate + pretty JSON.", code: """
+              let raw = '{"app":"XContainer","runs":12,"ok":true,"tags":["a","b"]}';
+              try {
+                let obj = JSON.parse(raw);
+                let keys = Object.keys(obj);
+                console.log("Valid JSON, " + keys.length + " top-level keys: " + keys.join(", "));
+                console.log(JSON.stringify(obj, null, 2).slice(0, 400));
+                "Keys: " + keys.join(", ") + " — edit raw, Re-run.";
+              } catch(e) { "Invalid JSON: " + e; }
               """)
         ]
     }
