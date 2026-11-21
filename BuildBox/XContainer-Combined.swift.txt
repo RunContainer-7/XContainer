@@ -15,7 +15,34 @@ struct Module: Identifiable, Codable, Hashable {
     var code: String
     var createdAt: Date = Date()
     var isPinned: Bool = false
-}
+    // Which container (folder) this module lives in. Defaults to General
+    // so modules saved by older versions still load.
+    var folder: String = "General"
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, code, createdAt, isPinned, folder
+    }
+
+    init(id: UUID = UUID(), name: String, code: String, createdAt: Date = Date(), isPinned: Bool = false, folder: String = "General") {
+        self.id = id
+        self.name = name
+        self.code = code
+        self.createdAt = createdAt
+        self.isPinned = isPinned
+        self.folder = folder
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        code = try c.decode(String.self, forKey: .code)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        let rawFolder = try c.decodeIfPresent(String.self, forKey: .folder) ?? "General"
+        let trimmed = rawFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        folder = trimmed.isEmpty ? "General" : String(trimmed.prefix(40))
+    }
 
 // MARK: - Template: copy -> add as module -> use
 struct Template: Identifiable, Hashable {
@@ -60,6 +87,9 @@ final class ModuleStore: ObservableObject {
     }
 
     func recordRun(moduleName: String, summary: String, hadError: Bool) {
+        // Auto-runs fire on every tab visit — skip exact repeats so real
+        // runs are not pushed out of the 100-entry cap by duplicates.
+        if let last = history.first, last.moduleName == moduleName, last.summary == summary, last.hadError == hadError { return }
         let e = RunEntry(moduleName: moduleName, summary: summary, hadError: hadError)
         history.insert(e, at: 0)
         if history.count > 100 { history = Array(history.prefix(100)) }
@@ -72,7 +102,8 @@ final class ModuleStore: ObservableObject {
     }
 
     func useTemplate(_ t: Template) -> Module {
-        add(name: t.name, code: t.code, pinned: t.pinByDefault)
+        // Templates land in the container matching their category (Games, Tools, …).
+        add(name: t.name, code: t.code, pinned: t.pinByDefault, folder: t.category)
     }
 
     private func loadHistory() {
@@ -92,21 +123,34 @@ final class ModuleStore: ObservableObject {
         return modules.first(where: { $0.id == id })
     }
 
-    func add(name: String, code: String, pinned: Bool) -> Module {
+    // Never create two modules with the same visible name.
+    func uniqueName(_ base: String) -> String {
+        if !modules.contains(where: { $0.name == base }) { return base }
+        var i = 2
+        while modules.contains(where: { $0.name == base + " (\(i))" }) { i += 1 }
+        return base + " (\(i))"
+    }
+
+    func add(name: String, code: String, pinned: Bool, folder: String = "General") -> Module {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let safeName = clean.isEmpty ? "Untitled module" : String(clean.prefix(80))
+        let safeName = uniqueName(clean.isEmpty ? "Untitled module" : String(clean.prefix(80)))
         let safeCode = String(code.prefix(200_000))
+        let f = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         if modules.count >= 500 { modules.removeFirst() }
-        let m = Module(name: safeName, code: safeCode, isPinned: pinned)
+        let m = Module(name: safeName, code: safeCode, isPinned: pinned, folder: f.isEmpty ? "General" : String(f.prefix(40)))
         modules.append(m)
         save()
         return m
     }
 
-    func update(id: UUID, name: String, code: String) {
+    func update(id: UUID, name: String, code: String, folder: String? = nil) {
         guard let i = modules.firstIndex(where: { $0.id == id }) else { return }
         modules[i].name = name
         modules[i].code = code
+        if let f = folder {
+            let t = f.trimmingCharacters(in: .whitespacesAndNewlines)
+            modules[i].folder = t.isEmpty ? "General" : String(t.prefix(40))
+        }
         save()
     }
 
@@ -117,7 +161,8 @@ final class ModuleStore: ObservableObject {
     }
 
     func duplicate(_ module: Module) -> Module {
-        let copy = Module(name: module.name + " copy", code: module.code, isPinned: false)
+        if modules.count >= 500 { modules.removeFirst() }
+        let copy = Module(name: uniqueName(module.name + " copy"), code: module.code, isPinned: false, folder: module.folder)
         modules.append(copy)
         save()
         return copy
@@ -125,7 +170,8 @@ final class ModuleStore: ObservableObject {
 
     func importModule(name: String, code: String) -> Module {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let m = Module(name: clean.isEmpty ? "Imported module" : clean, code: code, isPinned: false)
+        if modules.count >= 500 { modules.removeFirst() }
+        let m = Module(name: uniqueName(clean.isEmpty ? "Imported module" : String(clean.prefix(80))), code: String(code.prefix(200_000)), isPinned: false)
         modules.append(m)
         save()
         return m
@@ -169,7 +215,7 @@ final class ModuleStore: ObservableObject {
     }
 
     func exportJSON() -> URL? {
-        let arr = modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        let arr = modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned, "folder": $0.folder, "createdAt": $0.createdAt.timeIntervalSince1970] as [String: Any] }
         guard let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
         try? data.write(to: url)
@@ -179,11 +225,13 @@ final class ModuleStore: ObservableObject {
     func importJSON(_ data: Data) -> Int {
         guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return 0 }
         var n = 0
-        for d in arr {
+        for d in arr.prefix(500) {
             guard let code = d["code"] as? String else { continue }
             let name = (d["name"] as? String ?? "Imported").trimmingCharacters(in: .whitespacesAndNewlines)
             let pinned = (d["pinned"] as? Bool) ?? false
-            modules.append(Module(name: name.isEmpty ? "Imported" : name, code: code, isPinned: pinned))
+            let folder = (d["folder"] as? String ?? "General").trimmingCharacters(in: .whitespacesAndNewlines)
+            if modules.count >= 500 { modules.removeFirst() }
+            modules.append(Module(name: uniqueName(name.isEmpty ? "Imported" : name), code: String(code.prefix(200_000)), isPinned: pinned, folder: folder.isEmpty ? "General" : folder))
             n += 1
         }
         if n > 0 { save() }
@@ -196,10 +244,24 @@ final class ModuleStore: ObservableObject {
         save()
     }
 
+    // Adds back any missing examples WITHOUT touching user modules.
+    // (It used to overwrite everything — that destroyed work.)
     func restoreExamples() {
-        modules = Self.examples
+        var names = Set(modules.map { $0.name })
+        for ex in Self.examples where !names.contains(ex.name) {
+            if modules.count >= 500 { modules.removeFirst() }
+            modules.append(ex)
+            names.insert(ex.name)
+        }
         editingModuleID = nil
         save()
+    }
+
+    // Container (folder) names currently in use, sorted. Always includes General.
+    func folders() -> [String] {
+        var set = Set(modules.map { $0.folder })
+        set.insert("General")
+        return set.sorted()
     }
 
     // MARK: Persistence
@@ -941,11 +1003,16 @@ struct ModulesView: View {
     @State private var exportURL: URL? = nil
     @State private var query = ""
     @State private var sortBy = "Recent"
+    @State private var folderFilter = "All"
+    @State private var pendingDelete: Module? = nil
     @StateObject private var quickRunner = SafeRunner()
     @State private var quickName = ""
 
     var filtered: [Module] {
         var list = store.modules
+        if folderFilter != "All" {
+            list = list.filter { $0.folder == folderFilter }
+        }
         if !query.isEmpty {
             list = list.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.code.localizedCaseInsensitiveContains(query) }
         }
@@ -959,6 +1026,15 @@ struct ModulesView: View {
 
     var body: some View {
         VStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    folderChip("All")
+                    ForEach(store.folders(), id: \.self) { f in
+                        folderChip(f)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
             Picker("Sort", selection: $sortBy) {
                 Text("Recent").tag("Recent")
                 Text("Name").tag("Name")
@@ -993,6 +1069,13 @@ struct ModulesView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text(mod.name).font(.headline)
+                                    Text(mod.folder)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color(white: 0.14))
+                                        .clipShape(Capsule())
                                     Spacer()
                                     if mod.isPinned {
                                         Image(systemName: "pin.fill")
@@ -1040,7 +1123,7 @@ struct ModulesView: View {
                     }
                     .padding(.vertical, 4)
                     .swipeActions {
-                        Button(role: .destructive) { store.delete(mod) } label: { Label("Delete", systemImage: "trash") }
+                        Button(role: .destructive) { pendingDelete = mod } label: { Label("Delete", systemImage: "trash") }
                     }
                 }
             }
@@ -1105,6 +1188,12 @@ struct ModulesView: View {
             }
         }
         .fileExporter(isPresented: $showExporter, document: ExportDoc(url: exportURL), contentType: .json, defaultFilename: "xcontainer-modules.json") { _ in }
+        .alert("Delete module?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), presenting: pendingDelete) { mod in
+            Button("Delete", role: .destructive) { store.delete(mod); pendingDelete = nil }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { mod in
+            Text("\"" + mod.name + "\" will be removed from this device.")
+        }
         .onChange(of: quickRunner.result) { _, _ in
             if let r = quickRunner.result {
                 let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
@@ -1112,6 +1201,20 @@ struct ModulesView: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
+    }
+
+    private func folderChip(_ name: String) -> some View {
+        Button {
+            folderFilter = name
+        } label: {
+            Text(name)
+                .font(.caption.bold())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(folderFilter == name ? Color.white : Color(white: 0.14))
+                .foregroundStyle(folderFilter == name ? Color.black : Color.white)
+                .clipShape(Capsule())
+        }
     }
 
     private func moduleFileURL(_ mod: Module) -> URL {
@@ -1122,7 +1225,7 @@ struct ModulesView: View {
     }
 
     private func exportAll() {
-        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned, "folder": $0.folder, "createdAt": $0.createdAt.timeIntervalSince1970] as [String: Any] }
         if let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
             try? data.write(to: url)
@@ -1473,6 +1576,7 @@ struct EditorView: View {
 
     @State private var name = ""
     @State private var code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+    @State private var folder = "General"
     @State private var pinAsPanel = true
     @StateObject private var runner = SafeRunner()
     @State private var loadedID: UUID? = nil
@@ -1489,6 +1593,21 @@ struct EditorView: View {
                 Text("Module name").font(.caption).foregroundStyle(.secondary)
                 TextField("My first module", text: $name)
                     .textFieldStyle(.roundedBorder)
+
+                Text("Container").font(.caption).foregroundStyle(.secondary)
+                TextField("General", text: $folder)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(store.folders(), id: \.self) { f in
+                            Button(f) { folder = f }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                }
 
                 HStack {
                     Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
@@ -1551,6 +1670,7 @@ struct EditorView: View {
                         store.editingModuleID = nil
                         loadedID = nil
                         name = ""
+                        folder = "General"
                         code = "// write your script here"
                         runner.stop()
                     }
@@ -1576,12 +1696,14 @@ struct EditorView: View {
         if let m = store.module(withID: target) {
             name = m.name
             code = m.code
+            folder = m.folder
             pinAsPanel = m.isPinned
         } else {
             // Fresh script (Home -> Create, Modules -> +, or after Save).
             // Always reset so we never show the previous module's text.
             name = ""
             code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+            folder = "General"
             pinAsPanel = true
         }
         runner.stop()
@@ -1600,16 +1722,17 @@ struct EditorView: View {
         // so detail/panel never shows a blank confusing screen.
         let finalCode = code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "// empty module\nconsole.log(\"empty module\");" : code
         if let id = loadedID, store.module(withID: id) != nil {
-            store.update(id: id, name: clean, code: finalCode)
+            store.update(id: id, name: clean, code: finalCode, folder: folder)
             if let m = store.module(withID: id) { store.setPinned(m, pinned: pinAsPanel) }
         } else {
-            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel)
+            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel, folder: folder)
             loadedID = m.id
             store.editingModuleID = m.id
         }
         store.editingModuleID = nil
         loadedID = nil
         name = ""
+        folder = "General"
         code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
         runner.stop()
         selection = "modules"
@@ -1647,6 +1770,7 @@ struct AppsView: View {
 struct SettingsView: View {
     @EnvironmentObject var store: ModuleStore
     @State private var selfTest = ""
+    @State private var showResetConfirm = false
 
     var body: some View {
         List {
@@ -1657,8 +1781,10 @@ struct SettingsView: View {
             } header: { Text("About XContainer") }
 
             Section {
-                Button("Restore example modules") { store.restoreExamples() }
-                Button("Reset all modules", role: .destructive) { store.reset() }
+                Button("Add back example modules") { store.restoreExamples() }
+                Text("Adds any missing examples. Your modules are never touched.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button("Reset all modules", role: .destructive) { showResetConfirm = true }
             } header: { Text("Modules") }
 
             Section {
@@ -1694,6 +1820,12 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
+        .alert("Delete ALL modules?", isPresented: $showResetConfirm) {
+            Button("Delete everything", role: .destructive) { store.reset() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This wipes every module on this device, including history-backed names. Export first if unsure.")
+        }
     }
 }
 

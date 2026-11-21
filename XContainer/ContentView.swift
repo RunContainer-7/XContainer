@@ -276,11 +276,16 @@ struct ModulesView: View {
     @State private var exportURL: URL? = nil
     @State private var query = ""
     @State private var sortBy = "Recent"
+    @State private var folderFilter = "All"
+    @State private var pendingDelete: Module? = nil
     @StateObject private var quickRunner = SafeRunner()
     @State private var quickName = ""
 
     var filtered: [Module] {
         var list = store.modules
+        if folderFilter != "All" {
+            list = list.filter { $0.folder == folderFilter }
+        }
         if !query.isEmpty {
             list = list.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.code.localizedCaseInsensitiveContains(query) }
         }
@@ -294,6 +299,15 @@ struct ModulesView: View {
 
     var body: some View {
         VStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    folderChip("All")
+                    ForEach(store.folders(), id: \.self) { f in
+                        folderChip(f)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
             Picker("Sort", selection: $sortBy) {
                 Text("Recent").tag("Recent")
                 Text("Name").tag("Name")
@@ -328,6 +342,13 @@ struct ModulesView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text(mod.name).font(.headline)
+                                    Text(mod.folder)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color(white: 0.14))
+                                        .clipShape(Capsule())
                                     Spacer()
                                     if mod.isPinned {
                                         Image(systemName: "pin.fill")
@@ -375,7 +396,7 @@ struct ModulesView: View {
                     }
                     .padding(.vertical, 4)
                     .swipeActions {
-                        Button(role: .destructive) { store.delete(mod) } label: { Label("Delete", systemImage: "trash") }
+                        Button(role: .destructive) { pendingDelete = mod } label: { Label("Delete", systemImage: "trash") }
                     }
                 }
             }
@@ -440,6 +461,12 @@ struct ModulesView: View {
             }
         }
         .fileExporter(isPresented: $showExporter, document: ExportDoc(url: exportURL), contentType: .json, defaultFilename: "xcontainer-modules.json") { _ in }
+        .alert("Delete module?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), presenting: pendingDelete) { mod in
+            Button("Delete", role: .destructive) { store.delete(mod); pendingDelete = nil }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { mod in
+            Text("\"" + mod.name + "\" will be removed from this device.")
+        }
         .onChange(of: quickRunner.result) { _, _ in
             if let r = quickRunner.result {
                 let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
@@ -447,6 +474,20 @@ struct ModulesView: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
+    }
+
+    private func folderChip(_ name: String) -> some View {
+        Button {
+            folderFilter = name
+        } label: {
+            Text(name)
+                .font(.caption.bold())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(folderFilter == name ? Color.white : Color(white: 0.14))
+                .foregroundStyle(folderFilter == name ? Color.black : Color.white)
+                .clipShape(Capsule())
+        }
     }
 
     private func moduleFileURL(_ mod: Module) -> URL {
@@ -457,7 +498,7 @@ struct ModulesView: View {
     }
 
     private func exportAll() {
-        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned, "folder": $0.folder, "createdAt": $0.createdAt.timeIntervalSince1970] as [String: Any] }
         if let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
             try? data.write(to: url)

@@ -18,6 +18,8 @@ Ships with 4 examples: **Calculator**, **Mini Assistant**, **Counter App** (inte
 
 ## Templates (copy → Add module → Use)
 
+Modules now live in **Containers** (folders): Templates sort themselves into Games/Tools/etc., the Modules tab filters by container chips, and the Editor assigns one. Deletes and Reset ask first, restores never wipe, history skips repeats, names stay unique.
+
 New **Templates** tab with 24 starters in 4 groups:
 
 - **Mini-apps**: Notes, Todos, Timer, Tap Counter UI, Expense Tracker, Habit Tracker, Pomodoro

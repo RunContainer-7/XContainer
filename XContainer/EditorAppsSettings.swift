@@ -7,6 +7,7 @@ struct EditorView: View {
 
     @State private var name = ""
     @State private var code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+    @State private var folder = "General"
     @State private var pinAsPanel = true
     @StateObject private var runner = SafeRunner()
     @State private var loadedID: UUID? = nil
@@ -23,6 +24,21 @@ struct EditorView: View {
                 Text("Module name").font(.caption).foregroundStyle(.secondary)
                 TextField("My first module", text: $name)
                     .textFieldStyle(.roundedBorder)
+
+                Text("Container").font(.caption).foregroundStyle(.secondary)
+                TextField("General", text: $folder)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(store.folders(), id: \.self) { f in
+                            Button(f) { folder = f }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                }
 
                 HStack {
                     Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
@@ -85,6 +101,7 @@ struct EditorView: View {
                         store.editingModuleID = nil
                         loadedID = nil
                         name = ""
+                        folder = "General"
                         code = "// write your script here"
                         runner.stop()
                     }
@@ -110,12 +127,14 @@ struct EditorView: View {
         if let m = store.module(withID: target) {
             name = m.name
             code = m.code
+            folder = m.folder
             pinAsPanel = m.isPinned
         } else {
             // Fresh script (Home -> Create, Modules -> +, or after Save).
             // Always reset so we never show the previous module's text.
             name = ""
             code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+            folder = "General"
             pinAsPanel = true
         }
         runner.stop()
@@ -134,16 +153,17 @@ struct EditorView: View {
         // so detail/panel never shows a blank confusing screen.
         let finalCode = code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "// empty module\nconsole.log(\"empty module\");" : code
         if let id = loadedID, store.module(withID: id) != nil {
-            store.update(id: id, name: clean, code: finalCode)
+            store.update(id: id, name: clean, code: finalCode, folder: folder)
             if let m = store.module(withID: id) { store.setPinned(m, pinned: pinAsPanel) }
         } else {
-            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel)
+            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel, folder: folder)
             loadedID = m.id
             store.editingModuleID = m.id
         }
         store.editingModuleID = nil
         loadedID = nil
         name = ""
+        folder = "General"
         code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
         runner.stop()
         selection = "modules"
@@ -181,6 +201,7 @@ struct AppsView: View {
 struct SettingsView: View {
     @EnvironmentObject var store: ModuleStore
     @State private var selfTest = ""
+    @State private var showResetConfirm = false
 
     var body: some View {
         List {
@@ -191,8 +212,10 @@ struct SettingsView: View {
             } header: { Text("About XContainer") }
 
             Section {
-                Button("Restore example modules") { store.restoreExamples() }
-                Button("Reset all modules", role: .destructive) { store.reset() }
+                Button("Add back example modules") { store.restoreExamples() }
+                Text("Adds any missing examples. Your modules are never touched.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button("Reset all modules", role: .destructive) { showResetConfirm = true }
             } header: { Text("Modules") }
 
             Section {
@@ -228,5 +251,11 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
+        .alert("Delete ALL modules?", isPresented: $showResetConfirm) {
+            Button("Delete everything", role: .destructive) { store.reset() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This wipes every module on this device, including history-backed names. Export first if unsure.")
+        }
     }
 }

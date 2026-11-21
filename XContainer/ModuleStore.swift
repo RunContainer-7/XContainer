@@ -10,7 +10,34 @@ struct Module: Identifiable, Codable, Hashable {
     var code: String
     var createdAt: Date = Date()
     var isPinned: Bool = false
-}
+    // Which container (folder) this module lives in. Defaults to General
+    // so modules saved by older versions still load.
+    var folder: String = "General"
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, code, createdAt, isPinned, folder
+    }
+
+    init(id: UUID = UUID(), name: String, code: String, createdAt: Date = Date(), isPinned: Bool = false, folder: String = "General") {
+        self.id = id
+        self.name = name
+        self.code = code
+        self.createdAt = createdAt
+        self.isPinned = isPinned
+        self.folder = folder
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        code = try c.decode(String.self, forKey: .code)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        let rawFolder = try c.decodeIfPresent(String.self, forKey: .folder) ?? "General"
+        let trimmed = rawFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        folder = trimmed.isEmpty ? "General" : String(trimmed.prefix(40))
+    }
 
 // MARK: - Template: copy -> add as module -> use
 struct Template: Identifiable, Hashable {
@@ -55,6 +82,9 @@ final class ModuleStore: ObservableObject {
     }
 
     func recordRun(moduleName: String, summary: String, hadError: Bool) {
+        // Auto-runs fire on every tab visit — skip exact repeats so real
+        // runs are not pushed out of the 100-entry cap by duplicates.
+        if let last = history.first, last.moduleName == moduleName, last.summary == summary, last.hadError == hadError { return }
         let e = RunEntry(moduleName: moduleName, summary: summary, hadError: hadError)
         history.insert(e, at: 0)
         if history.count > 100 { history = Array(history.prefix(100)) }
@@ -67,7 +97,8 @@ final class ModuleStore: ObservableObject {
     }
 
     func useTemplate(_ t: Template) -> Module {
-        add(name: t.name, code: t.code, pinned: t.pinByDefault)
+        // Templates land in the container matching their category (Games, Tools, …).
+        add(name: t.name, code: t.code, pinned: t.pinByDefault, folder: t.category)
     }
 
     private func loadHistory() {
@@ -87,21 +118,34 @@ final class ModuleStore: ObservableObject {
         return modules.first(where: { $0.id == id })
     }
 
-    func add(name: String, code: String, pinned: Bool) -> Module {
+    // Never create two modules with the same visible name.
+    func uniqueName(_ base: String) -> String {
+        if !modules.contains(where: { $0.name == base }) { return base }
+        var i = 2
+        while modules.contains(where: { $0.name == base + " (\(i))" }) { i += 1 }
+        return base + " (\(i))"
+    }
+
+    func add(name: String, code: String, pinned: Bool, folder: String = "General") -> Module {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let safeName = clean.isEmpty ? "Untitled module" : String(clean.prefix(80))
+        let safeName = uniqueName(clean.isEmpty ? "Untitled module" : String(clean.prefix(80)))
         let safeCode = String(code.prefix(200_000))
+        let f = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         if modules.count >= 500 { modules.removeFirst() }
-        let m = Module(name: safeName, code: safeCode, isPinned: pinned)
+        let m = Module(name: safeName, code: safeCode, isPinned: pinned, folder: f.isEmpty ? "General" : String(f.prefix(40)))
         modules.append(m)
         save()
         return m
     }
 
-    func update(id: UUID, name: String, code: String) {
+    func update(id: UUID, name: String, code: String, folder: String? = nil) {
         guard let i = modules.firstIndex(where: { $0.id == id }) else { return }
         modules[i].name = name
         modules[i].code = code
+        if let f = folder {
+            let t = f.trimmingCharacters(in: .whitespacesAndNewlines)
+            modules[i].folder = t.isEmpty ? "General" : String(t.prefix(40))
+        }
         save()
     }
 
@@ -112,7 +156,8 @@ final class ModuleStore: ObservableObject {
     }
 
     func duplicate(_ module: Module) -> Module {
-        let copy = Module(name: module.name + " copy", code: module.code, isPinned: false)
+        if modules.count >= 500 { modules.removeFirst() }
+        let copy = Module(name: uniqueName(module.name + " copy"), code: module.code, isPinned: false, folder: module.folder)
         modules.append(copy)
         save()
         return copy
@@ -120,7 +165,8 @@ final class ModuleStore: ObservableObject {
 
     func importModule(name: String, code: String) -> Module {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let m = Module(name: clean.isEmpty ? "Imported module" : clean, code: code, isPinned: false)
+        if modules.count >= 500 { modules.removeFirst() }
+        let m = Module(name: uniqueName(clean.isEmpty ? "Imported module" : String(clean.prefix(80))), code: String(code.prefix(200_000)), isPinned: false)
         modules.append(m)
         save()
         return m
@@ -164,7 +210,7 @@ final class ModuleStore: ObservableObject {
     }
 
     func exportJSON() -> URL? {
-        let arr = modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        let arr = modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned, "folder": $0.folder, "createdAt": $0.createdAt.timeIntervalSince1970] as [String: Any] }
         guard let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
         try? data.write(to: url)
@@ -174,11 +220,13 @@ final class ModuleStore: ObservableObject {
     func importJSON(_ data: Data) -> Int {
         guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return 0 }
         var n = 0
-        for d in arr {
+        for d in arr.prefix(500) {
             guard let code = d["code"] as? String else { continue }
             let name = (d["name"] as? String ?? "Imported").trimmingCharacters(in: .whitespacesAndNewlines)
             let pinned = (d["pinned"] as? Bool) ?? false
-            modules.append(Module(name: name.isEmpty ? "Imported" : name, code: code, isPinned: pinned))
+            let folder = (d["folder"] as? String ?? "General").trimmingCharacters(in: .whitespacesAndNewlines)
+            if modules.count >= 500 { modules.removeFirst() }
+            modules.append(Module(name: uniqueName(name.isEmpty ? "Imported" : name), code: String(code.prefix(200_000)), isPinned: pinned, folder: folder.isEmpty ? "General" : folder))
             n += 1
         }
         if n > 0 { save() }
@@ -191,10 +239,24 @@ final class ModuleStore: ObservableObject {
         save()
     }
 
+    // Adds back any missing examples WITHOUT touching user modules.
+    // (It used to overwrite everything — that destroyed work.)
     func restoreExamples() {
-        modules = Self.examples
+        var names = Set(modules.map { $0.name })
+        for ex in Self.examples where !names.contains(ex.name) {
+            if modules.count >= 500 { modules.removeFirst() }
+            modules.append(ex)
+            names.insert(ex.name)
+        }
         editingModuleID = nil
         save()
+    }
+
+    // Container (folder) names currently in use, sorted. Always includes General.
+    func folders() -> [String] {
+        var set = Set(modules.map { $0.folder })
+        set.insert("General")
+        return set.sorted()
     }
 
     // MARK: Persistence
