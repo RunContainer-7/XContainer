@@ -502,10 +502,15 @@ struct HTMLView: UIViewRepresentable {
     let html: String
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> WKWebView {
-        let v = WKWebView()
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        let v = WKWebView(frame: .zero, configuration: config)
         v.isOpaque = false
         v.backgroundColor = .clear
         v.scrollView.backgroundColor = .clear
+        v.scrollView.bounces = true
+        v.scrollView.isScrollEnabled = true
         return v
     }
     func updateUIView(_ view: WKWebView, context: Context) {
@@ -521,9 +526,30 @@ struct HTMLView: UIViewRepresentable {
     }
 }
 
+// Fullscreen cover so panels/games can use the whole screen.
+struct FullscreenHTMLView: View {
+    let html: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            HTMLView(html: html)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Panel")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Done") { dismiss() }.bold()
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
 // MARK: - Shared output view
 struct RunOutputView: View {
     let result: JSRunResult
+    @State private var showFullscreen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -538,10 +564,19 @@ struct RunOutputView: View {
             }
             if !result.result.isEmpty {
                 if looksLikeHTML(result.result) {
-                    Text("App output (interactive)").font(.caption.bold()).foregroundStyle(.secondary)
+                    HStack {
+                        Text("App output (interactive)").font(.caption.bold()).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Fullscreen") { showFullscreen = true }
+                            .font(.caption.bold())
+                    }
                     HTMLView(html: result.result)
-                        .frame(minHeight: 320)
+                        .frame(minHeight: 480)
+                        .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .fullScreenCover(isPresented: $showFullscreen) {
+                            FullscreenHTMLView(html: result.result)
+                        }
                 } else {
                     Text("Return value").font(.caption.bold()).foregroundStyle(.secondary)
                     Text(result.result)
