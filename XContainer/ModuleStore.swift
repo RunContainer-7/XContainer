@@ -18,8 +18,8 @@ struct Template: Identifiable, Hashable {
     var name: String
     var category: String
     var blurb: String
-    var code: String
     var pinByDefault: Bool = false
+    var code: String
 }
 
 // MARK: - Run history entry

@@ -1,3 +1,13 @@
+import SwiftUI
+
+@main
+struct XContainerApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
 import Foundation
 import SwiftUI
 import Combine
@@ -18,8 +28,8 @@ struct Template: Identifiable, Hashable {
     var name: String
     var category: String
     var blurb: String
-    var code: String
     var pinByDefault: Bool = false
+    var code: String
 }
 
 // MARK: - Run history entry
@@ -1420,15 +1430,5 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
-    }
-}
-import SwiftUI
-
-@main
-struct XContainerApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
     }
 }
