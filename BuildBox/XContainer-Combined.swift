@@ -1,0 +1,1381 @@
+import Foundation
+import SwiftUI
+import Combine
+
+// MARK: - Model
+// A user script. When isPinned == true it also appears as its own tab/panel.
+struct Module: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var name: String
+    var code: String
+    var createdAt: Date = Date()
+    var isPinned: Bool = false
+}
+
+// MARK: - Template: copy -> add as module -> use
+struct Template: Identifiable, Hashable {
+    var id: String { name }
+    var name: String
+    var category: String
+    var blurb: String
+    var code: String
+    var pinByDefault: Bool = false
+}
+
+// MARK: - Run history entry
+struct RunEntry: Identifiable, Codable, Hashable {
+    var id: UUID = UUID()
+    var moduleName: String
+    var at: Date = Date()
+    var summary: String
+    var hadError: Bool = false
+}
+
+// MARK: - Store (persisted to UserDefaults so modules survive restarts)
+final class ModuleStore: ObservableObject {
+    @Published var modules: [Module] = []
+    // Set by Modules list when user taps Edit -> Editor picks it up.
+    @Published var editingModuleID: UUID? = nil
+    @Published var history: [RunEntry] = []
+
+    private let storageKey = "xcontainer.modules.v1"
+    private let seededKey = "xcontainer.seeded.v1"
+    private let historyKey = "xcontainer.history.v1"
+
+    init() {
+        let hadSavedData = load()
+        loadHistory()
+        // Only seed examples on very first launch. An empty array is a valid
+        // saved state (user hit Reset) and must stay empty across restarts.
+        if !hadSavedData {
+            modules = Self.examples
+            save()
+            UserDefaults.standard.set(true, forKey: seededKey)
+        }
+    }
+
+    func recordRun(moduleName: String, summary: String, hadError: Bool) {
+        let e = RunEntry(moduleName: moduleName, summary: summary, hadError: hadError)
+        history.insert(e, at: 0)
+        if history.count > 100 { history = Array(history.prefix(100)) }
+        saveHistory()
+    }
+
+    func clearHistory() {
+        history = []
+        saveHistory()
+    }
+
+    func useTemplate(_ t: Template) -> Module {
+        add(name: t.name, code: t.code, pinned: t.pinByDefault)
+    }
+
+    private func loadHistory() {
+        guard let data = UserDefaults.standard.data(forKey: historyKey),
+              let decoded = try? JSONDecoder().decode([RunEntry].self, from: data) else { return }
+        history = decoded
+    }
+
+    private func saveHistory() {
+        if let data = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
+    func module(withID id: UUID?) -> Module? {
+        guard let id else { return nil }
+        return modules.first(where: { $0.id == id })
+    }
+
+    func add(name: String, code: String, pinned: Bool) -> Module {
+        let m = Module(name: name, code: code, isPinned: pinned)
+        modules.append(m)
+        save()
+        return m
+    }
+
+    func update(id: UUID, name: String, code: String) {
+        guard let i = modules.firstIndex(where: { $0.id == id }) else { return }
+        modules[i].name = name
+        modules[i].code = code
+        save()
+    }
+
+    func delete(_ module: Module) {
+        modules.removeAll(where: { $0.id == module.id })
+        if editingModuleID == module.id { editingModuleID = nil }
+        save()
+    }
+
+    func duplicate(_ module: Module) -> Module {
+        let copy = Module(name: module.name + " copy", code: module.code, isPinned: false)
+        modules.append(copy)
+        save()
+        return copy
+    }
+
+    func importModule(name: String, code: String) -> Module {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let m = Module(name: clean.isEmpty ? "Imported module" : clean, code: code, isPinned: false)
+        modules.append(m)
+        save()
+        return m
+    }
+
+    func togglePin(_ module: Module) {
+        guard let i = modules.firstIndex(where: { $0.id == module.id }) else { return }
+        modules[i].isPinned.toggle()
+        save()
+    }
+
+    func setPinned(_ module: Module, pinned: Bool) {
+        guard let i = modules.firstIndex(where: { $0.id == module.id }) else { return }
+        modules[i].isPinned = pinned
+        save()
+    }
+
+    func reset() {
+        modules = []
+        editingModuleID = nil
+        save()
+    }
+
+    func restoreExamples() {
+        modules = Self.examples
+        editingModuleID = nil
+        save()
+    }
+
+    // MARK: Persistence
+    @discardableResult
+    private func load() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return false }
+        if let decoded = try? JSONDecoder().decode([Module].self, from: data) {
+            modules = decoded
+            return true
+        }
+        return false
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(modules) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+
+    // MARK: - Starter modules so the app isn't empty
+    static var examples: [Module] {
+        [
+            Module(
+                name: "Calculator",
+                code: """
+                // Calculator — edit the numbers, hit Run
+                let a = 12;
+                let b = 30;
+                console.log(a + " + " + b + " = " + (a + b));
+                console.log(a + " * " + b + " = " + (a * b));
+                (a + b) * 2;
+                """,
+                isPinned: true
+            ),
+            Module(
+                name: "Mini Assistant",
+                code: """
+                // Hardcoded assistant — change the question below
+                function answer(q) {
+                  q = q.toLowerCase();
+                  if (q.includes("hello") || q.includes("hi")) return "Hi! I'm your mini assistant inside XContainer.";
+                  if (q.includes("who")) return "I'm a demo assistant running on JavaScriptCore.";
+                  if (q.includes("calc")) return "Try the Calculator module for math!";
+                  return "I only know a few hardcoded replies. Edit me to teach me more!";
+                }
+                let question = "hello, who are you?";
+                console.log("You: " + question);
+                answer(question);
+                """
+            ),
+            Module(
+                name: "Counter App",
+                code: """
+                // Interactive tab: return HTML and the panel renders it.
+                // Tap the buttons in the panel — that's real <script> running in the tab.
+                var count = parseInt(localStorage.getItem("counter") || "0");
+                function render(n) {
+                  return "<div style='font-family:-apple-system;padding:20px;text-align:center'>"
+                    + "<h1>" + n + "</h1>"
+                    + "<button onclick='window.webkit.messageHandlers.noop.postMessage(1)' style='font-size:20px;padding:10px 20px'>+1</button>"
+                    + "<p style='color:#888'>Counter demo — full tap handling needs a bridge; edit me to style it!</p>"
+                    + "</div>";
+                }
+                console.log("Counter loaded: " + count);
+                localStorage.setItem("counter", String(count + 1));
+                render(count);
+                """,
+                isPinned: true
+            ),
+            Module(
+                name: "Dice Game",
+                code: """
+                // Tiny game — tap Re-run to roll again
+                let roll = Math.floor(Math.random() * 6) + 1;
+                console.log("You rolled: " + roll);
+                if (roll === 6) "JACKPOT! You rolled a 6!";
+                else if (roll >= 4) "Nice! You got " + roll;
+                else "You got " + roll + " — try again!";
+                """
+            )
+        ]
+    }
+
+    // MARK: - Template gallery: copy -> Add module -> Use
+    static var templates: [Template] {
+        [
+            Template(name: "Notes", category: "Mini-apps", blurb: "Quick notes with localStorage.", pinByDefault: true, code: """
+              // Notes — saved in localStorage, survives re-runs
+              var notes = JSON.parse(localStorage.getItem("notes") || "[]");
+              function add(t) { notes.push(t); localStorage.setItem("notes", JSON.stringify(notes)); }
+              // Edit the line below, then Run:
+              // add("Buy milk");
+              console.log("Notes (" + notes.length + "):");
+              notes.forEach(function(n, i) { console.log((i+1) + ". " + n); });
+              notes.length ? notes.join("\n") : "No notes yet — uncomment add() and Run.";
+              """),
+            Template(name: "Todos", category: "Mini-apps", blurb: "Check off tasks.", code: """
+              var todos = JSON.parse(localStorage.getItem("todos") || '["Show friend the app","Try a template"]');
+              todos.forEach(function(t, i) { console.log((i+1) + ". [ ] " + t); });
+              setTimeout(function() { console.log("Tip: edit the array, Re-run, it persists."); }, 0);
+              "Done: " + todos.length + " todos listed";
+              """),
+            Template(name: "Timer", category: "Mini-apps", blurb: "Countdown demo.", code: """
+              // Timer — counts down from N
+              let start = 5;
+              for (let i = start; i >= 0; i--) { console.log(i === 0 ? "GO!" : i + "..."); }
+              "Finished countdown from " + start;
+              """),
+            Template(name: "Tap Counter UI", category: "Mini-apps", blurb: "Interactive HTML panel.", pinByDefault: true, code: """
+              var count = parseInt(localStorage.getItem("tapCount") || "0");
+              localStorage.setItem("tapCount", String(count + 1));
+              console.log("Opened " + (count + 1) + " times");
+              "<div style='font-family:-apple-system;padding:24px;text-align:center;background:#111;color:#fff;border-radius:16px'>"
+                + "<h1>" + count + "</h1><p>Opens counted with localStorage.</p>"
+                + "<p style='color:#888'>Re-run to +1. Edit me to add buttons!</p></div>";
+              """),
+            Template(name: "Dice Roller", category: "Games", blurb: "Roll d6 / d20.", code: """
+              function roll(sides) { return Math.floor(Math.random() * sides) + 1; }
+              let d6 = roll(6);
+              let d20 = roll(20);
+              console.log("d6: " + d6 + "  |  d20: " + d20);
+              d20 === 20 ? "CRITICAL HIT! (d20 = 20)" : "You rolled d6=" + d6 + ", d20=" + d20;
+              """),
+            Template(name: "Guess Number", category: "Games", blurb: "Guess the 1-10 number.", code: """
+              // Change guess, hit Re-run to play again
+              let secret = Math.floor(Math.random() * 10) + 1;
+              let guess = 7;
+              console.log("You guessed " + guess + ", secret is " + secret);
+              guess === secret ? "Correct! Amazing!" : (guess < secret ? "Too low — it was " + secret : "Too high — it was " + secret);
+              """),
+            Template(name: "Rock Paper Scissors", category: "Games", blurb: "Play vs computer.", code: """
+              let you = "rock"; // change to rock | paper | scissors
+              let picks = ["rock", "paper", "scissors"];
+              let cpu = picks[Math.floor(Math.random() * 3)];
+              console.log("You: " + you + "  CPU: " + cpu);
+              if (you === cpu) "Draw!";
+              else if ((you === "rock" && cpu === "scissors") || (you === "paper" && cpu === "rock") || (you === "scissors" && cpu === "paper")) "You win!";
+              else "CPU wins!";
+              """),
+            Template(name: "Calculator+", category: "Tools", blurb: "Better calculator.", code: """
+              function calc(a, op, b) {
+                if (op === "+") return a + b;
+                if (op === "-") return a - b;
+                if (op === "*") return a * b;
+                if (op === "/") return b === 0 ? "Error: divide by zero" : a / b;
+                return "Unknown op " + op;
+              }
+              console.log("12 * 30 = " + calc(12, "*", 30));
+              console.log("100 / 4 = " + calc(100, "/", 4));
+              calc(7, "*", 6);
+              """),
+            Template(name: "JSON Formatter", category: "Tools", blurb: "Pretty-print JSON.", code: """
+              let raw = '{"name":"XContainer","tabs":5,"pinned":true}';
+              try {
+                let obj = JSON.parse(raw);
+                console.log(JSON.stringify(obj, null, 2));
+                "Keys: " + Object.keys(obj).join(", ");
+              } catch(e) { "Invalid JSON: " + e; }
+              """),
+            Template(name: "Base64 Tool", category: "Tools", blurb: "Encode text (pure JS).", code: """
+              // Tiny base64 encode (no network needed)
+              function b64(s) {
+                let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+                let out = "", i = 0;
+                while (i < s.length) {
+                  let a = s.charCodeAt(i++), b = s.charCodeAt(i++), c = s.charCodeAt(i++);
+                  let x = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c);
+                  out += chars[(x >> 18) & 63] + chars[(x >> 12) & 63] + (isNaN(b) ? "=" : chars[(x >> 6) & 63]) + (isNaN(c) ? "=" : chars[x & 63]);
+                }
+                return out;
+              }
+              let msg = "hello friend!";
+              console.log(msg + " -> " + b64(msg));
+              b64(msg);
+              """),
+            Template(name: "Password Generator", category: "Tools", blurb: "Random password.", code: """
+              let len = 14;
+              let abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#";
+              let pw = "";
+              for (let i = 0; i < len; i++) pw += abc[Math.floor(Math.random() * abc.length)];
+              console.log("New password: " + pw);
+              pw;
+              """),
+            Template(name: "Dark Card UI", category: "HTML UI", blurb: "Starter panel layout.", pinByDefault: true, code: """
+              console.log("Rendering card UI below");
+              "<div style='font-family:-apple-system;background:#000;color:#fff;padding:16px'>"
+              + "<div style='background:#161616;border-radius:16px;padding:20px'>"
+              + "<h2 style='margin:0'>Hello friend!</h2><p style='color:#aaa'>Copy this template, edit the text, Re-run.</p>"
+              + "<button style='background:#fff;color:#000;border:0;border-radius:10px;padding:10px 16px;font-weight:700'>Get started</button>"
+              + "</div></div>";
+              """),
+            Template(name: "Form UI", category: "HTML UI", blurb: "Input + list starter.", pinByDefault: true, code: """
+              console.log("Form UI rendered");
+              "<div style='font-family:-apple-system;padding:16px;background:#000;color:#fff'>"
+              + "<h3>Feedback</h3><input placeholder='Your name' style='width:100%;padding:10px;border-radius:10px;border:1px solid #333;background:#111;color:#fff'/>"
+              + "<p style='color:#888'>Static demo — wire JS to read inputs next.</p></div>";
+              """)
+        ]
+    }
+}
+import Foundation
+import JavaScriptCore
+
+// Result of running one script.
+struct JSRunResult: Equatable {
+    var logs: [String] = []
+    var result: String = ""
+    var error: String? = nil
+
+    var hasOutput: Bool { !logs.isEmpty || !result.isEmpty || error != nil }
+}
+
+// Real JS engine on iOS. Supports console.log(...) / log(...) / print(...)
+// and returns the completion value of the script.
+private final class LogBox {
+    var lines: [String] = []
+}
+
+final class JSEngine {
+    static func run(_ code: String) -> JSRunResult {
+        var res = JSRunResult()
+        // Empty editor should not produce a confusing "undefined" result.
+        if code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            res.result = "(no output)"
+            return res
+        }
+        let box = LogBox()
+        var handlerError: String? = nil
+
+        guard let ctx = JSContext() else {
+            res.error = "Could not create JS engine"
+            return res
+        }
+
+        // console.log("a", 1) -> one line "a 1"
+        let appendLog: @convention(block) (String) -> Void = { msg in
+            box.lines.append(msg)
+        }
+        ctx.setObject(appendLog, forKeyedSubscript: "iosLog" as NSString)
+
+        // localStorage polyfill backed by UserDefaults (shared across runs).
+        // Kept tiny on purpose: string keys/values only.
+        let storageKey = "xcontainer.jsStorage.v1"
+        let iosGet: @convention(block) (String) -> String = { k in
+            let d = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+            return d[k] ?? ""
+        }
+        let iosHas: @convention(block) (String) -> Bool = { k in
+            let d = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+            return d[k] != nil
+        }
+        let iosSet: @convention(block) (String, String) -> Void = { k, v in
+            var d = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+            d[k] = v
+            UserDefaults.standard.set(d, forKey: storageKey)
+        }
+        let iosRemove: @convention(block) (String) -> Void = { k in
+            var d = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: String] ?? [:]
+            d.removeValue(forKey: k)
+            UserDefaults.standard.set(d, forKey: storageKey)
+        }
+        let iosSleep: @convention(block) (Double) -> Void = { ms in
+            if ms > 0 { Thread.sleep(forTimeInterval: min(ms / 1000.0, 3.0)) }
+        }
+        ctx.setObject(iosGet, forKeyedSubscript: "iosGet" as NSString)
+        ctx.setObject(iosHas, forKeyedSubscript: "iosHas" as NSString)
+        ctx.setObject(iosSet, forKeyedSubscript: "iosSet" as NSString)
+        ctx.setObject(iosRemove, forKeyedSubscript: "iosRemove" as NSString)
+        ctx.setObject(iosSleep, forKeyedSubscript: "iosSleep" as NSString)
+        ctx.evaluateScript("""
+        function __fmt(v) {
+          if (v === undefined) return "undefined";
+          if (v === null) return "null";
+          if (typeof v === "object") { try { return JSON.stringify(v); } catch(e) { return String(v); } }
+          return String(v);
+        }
+        function log() { iosLog(Array.from(arguments).map(__fmt).join(" ")); }
+        const console = { log: log, info: log, warn: log, error: log, debug: log };
+        function print() { log.apply(null, arguments); }
+        function alert(msg) { log("ALERT: " + __fmt(msg)); }
+        function prompt(msg, def) { log("PROMPT: " + __fmt(msg)); return def === undefined ? "" : String(def); }
+        // Synchronous timer polyfill: runs the callback after a short blocking
+        // sleep so template code using setTimeout still works in order.
+        // (No background intervals on iOS JSContext — use Re-run for loops.)
+        var __timerId = 0;
+        function setTimeout(fn, ms) {
+          __timerId += 1;
+          try { iosSleep(Number(ms) || 0); } catch(e) {}
+          try { if (typeof fn === "function") fn(); else eval(fn); } catch(e) { throw e; }
+          return __timerId;
+        }
+        function clearTimeout(id) {}
+        const localStorage = {
+          getItem: function(k) { k = String(k); return iosHas(k) ? iosGet(k) : null; },
+          setItem: function(k, v) { iosSet(String(k), String(v)); },
+          removeItem: function(k) { iosRemove(String(k)); }
+        };
+        """)
+
+        ctx.exceptionHandler = { _, exc in
+            if let e = exc?.toString(), !e.isEmpty {
+                handlerError = e
+            }
+        }
+
+        let value = ctx.evaluateScript(code)
+
+        if let exc = ctx.exception?.toString(), !exc.isEmpty {
+            handlerError = exc
+            ctx.exception = nil
+        }
+
+        res.error = handlerError
+        res.logs = box.lines
+        if let v = value, !v.isUndefined {
+            let s = v.toString() ?? ""
+            // Hide bare "undefined" when there are already logs.
+            if s != "undefined" || box.lines.isEmpty {
+                res.result = s
+            }
+        }
+        return res
+    }
+}
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+import WebKit
+
+// Root: 5 fixed tabs + one extra tab per pinned module ("panel in your tab").
+struct ContentView: View {
+    @StateObject private var store = ModuleStore()
+    @State private var selection = "home"
+
+    var body: some View {
+        TabView(selection: $selection) {
+            NavigationStack {
+                HomeView(selection: $selection)
+            }
+            .tabItem { Label("Home", systemImage: "square.grid.2x2") }
+            .tag("home")
+
+            NavigationStack {
+                ModulesView(selection: $selection)
+            }
+            .tabItem { Label("Modules", systemImage: "square.stack") }
+            .tag("modules")
+
+            NavigationStack {
+                TemplatesView(selection: $selection)
+            }
+            .tabItem { Label("Templates", systemImage: "doc.on.doc") }
+            .tag("templates")
+
+            NavigationStack {
+                EditorView(selection: $selection)
+            }
+            .tabItem { Label("Editor", systemImage: "pencil") }
+            .tag("editor")
+
+            NavigationStack {
+                AppsView()
+            }
+            .tabItem { Label("Apps", systemImage: "sparkles") }
+            .tag("apps")
+
+            NavigationStack {
+                SettingsView()
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+            .tag("settings")
+
+            // Each pinned module becomes its own tab. Tap it -> live output.
+            ForEach(store.modules.filter { $0.isPinned }) { mod in
+                NavigationStack {
+                    ModulePanelView(moduleID: mod.id)
+                }
+                .tabItem { Label(mod.name, systemImage: "play.square") }
+                .tag("panel-" + mod.id.uuidString)
+            }
+        }
+        .environmentObject(store)
+        .preferredColorScheme(.dark)
+        .onChange(of: store.modules.filter { $0.isPinned }.map(\.id)) { _, _ in
+            // If the selected pinned tab was unpinned/deleted, fall back to Modules.
+            if selection.hasPrefix("panel-") {
+                let idString = String(selection.dropFirst("panel-".count))
+                let stillPinned = store.modules.contains(where: { $0.id.uuidString == idString && $0.isPinned })
+                if !stillPinned { selection = "modules" }
+            }
+        }
+    }
+}
+
+// MARK: - Home
+struct HomeView: View {
+    @EnvironmentObject var store: ModuleStore
+    @Binding var selection: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("XContainer")
+                    .font(.largeTitle.bold())
+                Text("A small container for your scripts and modules.")
+                    .foregroundStyle(.secondary)
+                Text("Modules: \(store.modules.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                navCard(title: "Open Modules", sub: "View and manage your modules.", icon: "square.stack") {
+                    selection = "modules"
+                }
+                navCard(title: "Browse Templates", sub: "Copy a starter, add it, use it.", icon: "doc.on.doc") {
+                    selection = "templates"
+                }
+                navCard(title: "Create Script", sub: "Start a new module with custom code.", icon: "pencil") {
+                    store.editingModuleID = nil
+                    selection = "editor"
+                }
+                navCard(title: "Recommended Apps", sub: "Tools similar to XContainer.", icon: "sparkles") {
+                    selection = "apps"
+                }
+                navCard(title: "Settings", sub: "App info and module controls.", icon: "gearshape") {
+                    selection = "settings"
+                }
+
+                if !store.modules.filter({ $0.isPinned }).isEmpty {
+                    Text("My Panels")
+                        .font(.headline)
+                        .padding(.top, 4)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        ForEach(store.modules.filter { $0.isPinned }) { mod in
+                            NavigationLink {
+                                ModuleDetailView(moduleID: mod.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Image(systemName: "play.square")
+                                        .font(.title2)
+                                    Text(mod.name).font(.headline)
+                                    Text("Tap to see output")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
+                                .background(Color(white: 0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Home")
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    private func navCard(title: String, sub: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.headline)
+                    Text(sub).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: icon).foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(white: 0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Templates gallery: copy -> Add module -> Use
+struct TemplatesView: View {
+    @EnvironmentObject var store: ModuleStore
+    @Binding var selection: String
+    @State private var query = ""
+    @State private var category = "All"
+    @State private var addedName = ""
+
+    var categories: [String] {
+        var s = Set(ModuleStore.templates.map { $0.category })
+        s.insert("All")
+        return ["All"] + s.sorted()
+    }
+
+    var filtered: [Template] {
+        ModuleStore.templates.filter { t in
+            (category == "All" || t.category == category)
+            && (query.isEmpty || t.name.localizedCaseInsensitiveContains(query) || t.blurb.localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    var body: some View {
+        VStack {
+            Picker("Category", selection: $category) {
+                ForEach(categories, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            if !addedName.isEmpty {
+                Text("Added \"" + addedName + "\" — find it in Modules.")
+                    .font(.caption)
+                    .padding(8)
+                    .background(Color.green.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal)
+            }
+            List(filtered) { t in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(t.name).font(.headline)
+                        Spacer()
+                        Text(t.category).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(t.blurb).font(.caption).foregroundStyle(.secondary)
+                    Text(t.code)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    HStack {
+                        Spacer()
+                        Button("Copy") {
+                            UIPasteboard.general.string = t.code
+                            addedName = ""
+                        }.buttonStyle(.bordered)
+                        Button("Use template") {
+                            let m = store.useTemplate(t)
+                            addedName = m.name
+                            store.editingModuleID = m.id
+                        }.buttonStyle(.borderedProminent)
+                        Button("Use & Open") {
+                            let m = store.useTemplate(t)
+                            addedName = ""
+                            store.editingModuleID = m.id
+                            selection = "editor"
+                        }.buttonStyle(.bordered)
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 4)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+        }
+        .searchable(text: $query, prompt: "Search templates")
+        .navigationTitle("Templates")
+        .background(Color.black.ignoresSafeArea())
+    }
+}
+
+// MARK: - Modules list (search + sort + safe run + file export)
+struct ModulesView: View {
+    @EnvironmentObject var store: ModuleStore
+    @Binding var selection: String
+    @State private var lastRunText = ""
+    @State private var lastRunError = ""
+    @State private var showImporter = false
+    @State private var showExporter = false
+    @State private var exportURL: URL? = nil
+    @State private var query = ""
+    @State private var sortBy = "Recent"
+    @StateObject private var quickRunner = SafeRunner()
+    @State private var quickName = ""
+
+    var filtered: [Module] {
+        var list = store.modules
+        if !query.isEmpty {
+            list = list.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.code.localizedCaseInsensitiveContains(query) }
+        }
+        switch sortBy {
+        case "Name": list.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case "Oldest": list.sort { $0.createdAt < $1.createdAt }
+        default: list.sort { $0.createdAt > $1.createdAt }
+        }
+        return list
+    }
+
+    var body: some View {
+        VStack {
+            Picker("Sort", selection: $sortBy) {
+                Text("Recent").tag("Recent")
+                Text("Name").tag("Name")
+                Text("Oldest").tag("Oldest")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            if store.modules.isEmpty {
+                Text("No modules yet. Grab one from Templates or tap + below.")
+                    .foregroundStyle(.secondary)
+                    .padding()
+            }
+            if quickRunner.isRunning {
+                HStack {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Running " + quickName + "…")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Stop") { quickRunner.stop() }.font(.caption)
+                }
+                .padding(.horizontal)
+            } else if let r = quickRunner.result {
+                RunOutputView(result: r)
+                    .padding(.horizontal)
+            }
+            List {
+                ForEach(filtered) { mod in
+                    VStack(alignment: .leading, spacing: 8) {
+                        NavigationLink {
+                            ModuleDetailView(moduleID: mod.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(mod.name).font(.headline)
+                                    Spacer()
+                                    if mod.isPinned {
+                                        Image(systemName: "pin.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(mod.code)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Run") { quickRun(mod) }
+                                .buttonStyle(.bordered)
+                            Button(mod.isPinned ? "Unpin" : "Pin") {
+                                store.togglePin(mod)
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Edit") {
+                                store.editingModuleID = mod.id
+                                selection = "editor"
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Duplicate") {
+                                let c = store.duplicate(mod)
+                                lastRunError = ""
+                                lastRunText = "Duplicated as \"" + c.name + "\""
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Copy") {
+                                UIPasteboard.general.string = mod.code
+                                lastRunError = ""
+                                lastRunText = mod.name + ": code copied"
+                            }
+                            .buttonStyle(.bordered)
+                            ShareLink("Share", item: mod.code)
+                                .buttonStyle(.bordered)
+                            ShareLink("File", item: moduleFileURL(mod))
+                                .buttonStyle(.bordered)
+                        }
+                        .font(.caption)
+                    }
+                    .padding(.vertical, 4)
+                    .swipeActions {
+                        Button(role: .destructive) { store.delete(mod) } label: { Label("Delete", systemImage: "trash") }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+
+            if !lastRunText.isEmpty {
+                Text(lastRunText)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.blue.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal)
+            }
+            if !lastRunError.isEmpty {
+                Text(lastRunError)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.red.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal)
+            }
+        }
+        .navigationTitle("Modules")
+        .searchable(text: $query, prompt: "Search modules")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showImporter = true
+                } label: { Image(systemName: "square.and.arrow.down") }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    exportAll()
+                } label: { Image(systemName: "square.and.arrow.up") }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    store.editingModuleID = nil
+                    selection = "editor"
+                } label: { Image(systemName: "plus") }
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, .javaScript]) { res in
+            do {
+                let url = try res.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty {
+                    let base = url.deletingPathExtension().lastPathComponent
+                    let m = store.importModule(name: base.isEmpty ? "Imported module" : base, code: text)
+                    lastRunError = ""
+                    lastRunText = "Imported \"" + m.name + "\""
+                } else {
+                    lastRunError = "Could not read that file (empty or not UTF-8)."
+                }
+            } catch {
+                lastRunError = "Import failed: " + error.localizedDescription
+            }
+        }
+        .fileExporter(isPresented: $showExporter, document: ExportDoc(url: exportURL), contentType: .json, defaultFilename: "xcontainer-modules.json") { _ in }
+        .onChange(of: quickRunner.result) { _, _ in
+            if let r = quickRunner.result {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: quickName, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+            }
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    private func moduleFileURL(_ mod: Module) -> URL {
+        let safe = mod.name.replacingOccurrences(of: "/", with: "-").prefix(40)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(String(safe) + ".js")
+        try? mod.code.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    private func exportAll() {
+        let arr = store.modules.map { ["name": $0.name, "code": $0.code, "pinned": $0.isPinned] as [String: Any] }
+        if let data = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted]) {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("xcontainer-modules.json")
+            try? data.write(to: url)
+            exportURL = url
+            showExporter = true
+        }
+    }
+
+    private func quickRun(_ mod: Module) {
+        // Off-main-thread so a looping module never freezes the list.
+        quickName = mod.name
+        lastRunError = ""
+        lastRunText = ""
+        quickRunner.start(mod.code)
+    }
+}
+
+// Wrapper so Export-All can use .fileExporter.
+struct ExportDoc: FileDocument {
+    var url: URL?
+    static var readableContentTypes: [UTType] { [.json] }
+    init(url: URL?) { self.url = url }
+    init(configuration: ReadConfiguration) throws { self.url = nil }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        if let url, let data = try? Data(contentsOf: url) {
+            return FileWrapper(regularFileWithContents: data)
+        }
+        return FileWrapper(regularFileWithContents: Data("{}".utf8))
+    }
+}
+
+// MARK: - Safe runner (JS runs off main thread, Stop + timeout included)
+final class SafeRunner: ObservableObject {
+    @Published var result: JSRunResult? = nil
+    @Published var isRunning = false
+    private var generation = 0
+
+    func start(_ code: String, timeout: Double = 5) {
+        generation += 1
+        let g = generation
+        isRunning = true
+        result = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = JSEngine.run(code)
+            DispatchQueue.main.async {
+                guard g == self.generation else { return }
+                self.result = r
+                self.isRunning = false
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+            guard g == self.generation && self.isRunning else { return }
+            self.generation += 1
+            self.isRunning = false
+            var t = JSRunResult()
+            t.error = "Timed out - likely an infinite loop. Tap Re-run to try again."
+            self.result = t
+        }
+    }
+
+    func stop() {
+        generation += 1
+        isRunning = false
+    }
+}
+
+func looksLikeHTML(_ s: String) -> Bool {
+    let lower = s.lowercased()
+    guard s.contains("<") && s.contains(">") else { return false }
+    let tags = ["<html", "<div", "<button", "<h1", "<h2", "<h3", "<p", "<style", "<span", "<ul", "<ol", "<li", "<input", "<table", "<img", "<a ", "<form"]
+    return tags.contains(where: { lower.contains($0) })
+}
+
+struct HTMLView: UIViewRepresentable {
+    let html: String
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> WKWebView {
+        let v = WKWebView()
+        v.isOpaque = false
+        v.backgroundColor = .clear
+        v.scrollView.backgroundColor = .clear
+        return v
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {
+        // Don't reload on every SwiftUI refresh — that would wipe
+        // scroll position / input text in the interactive panel.
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            view.loadHTMLString(html, baseURL: nil)
+        }
+    }
+    final class Coordinator {
+        var lastHTML: String = ""
+    }
+}
+
+// MARK: - Shared output view
+struct RunOutputView: View {
+    let result: JSRunResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !result.logs.isEmpty {
+                Text("Console").font(.caption.bold()).foregroundStyle(.secondary)
+                Text(result.logs.joined(separator: "\n"))
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            if !result.result.isEmpty {
+                if looksLikeHTML(result.result) {
+                    Text("App output (interactive)").font(.caption.bold()).foregroundStyle(.secondary)
+                    HTMLView(html: result.result)
+                        .frame(minHeight: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                } else {
+                    Text("Return value").font(.caption.bold()).foregroundStyle(.secondary)
+                    Text(result.result)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.green.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            if let e = result.error, !e.isEmpty {
+                Text("Error").font(.caption.bold()).foregroundStyle(.red)
+                Text(e)
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.red.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+}
+
+// MARK: - Module detail: tap a module -> see live output
+struct ModuleDetailView: View {
+    @EnvironmentObject var store: ModuleStore
+    let moduleID: UUID
+    @StateObject private var runner = SafeRunner()
+
+    private var module: Module? { store.modules.first(where: { $0.id == moduleID }) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let m = module {
+                    Text(m.name).font(.title2.bold())
+                    Text(m.code)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color(white: 0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    HStack {
+                        Button("Re-run") { runner.start(m.code) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(runner.isRunning)
+                        if runner.isRunning {
+                            Button("Stop") { runner.stop() }
+                                .buttonStyle(.bordered)
+                        }
+                        Button(m.isPinned ? "Unpin from Tabs" : "Pin to Tabs") {
+                            store.togglePin(m)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if runner.isRunning {
+                        Text("Running… (Stop frees the app if it loops)").foregroundStyle(.secondary)
+                    } else if let r = runner.result {
+                        RunOutputView(result: r)
+                    }
+                } else {
+                    Text("This module was deleted.").foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Module")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(Color.black.ignoresSafeArea())
+        .onAppear {
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: module?.code ?? "") { _, _ in
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: runner.result) { _, _ in
+            if let r = runner.result, let m = module {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+            }
+        }
+    }
+}
+
+// MARK: - Pinned panel tab: same as detail, auto-runs
+struct ModulePanelView: View {
+    @EnvironmentObject var store: ModuleStore
+    let moduleID: UUID
+    @StateObject private var runner = SafeRunner()
+
+    private var module: Module? { store.modules.first(where: { $0.id == moduleID }) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let m = module {
+                    Text(m.name).font(.title2.bold())
+                    HStack {
+                        Button("Re-run") { runner.start(m.code) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(runner.isRunning)
+                        if runner.isRunning {
+                            Button("Stop") { runner.stop() }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    if runner.isRunning {
+                        Text("Running…").foregroundStyle(.secondary)
+                    } else if let r = runner.result {
+                        RunOutputView(result: r)
+                    }
+                } else {
+                    Text("Unpinned or deleted.").foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle(module?.name ?? "Panel")
+        .background(Color.black.ignoresSafeArea())
+        .onAppear {
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: module?.code ?? "") { _, _ in
+            if let m = module, !m.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { runner.start(m.code) }
+        }
+        .onChange(of: runner.result) { _, _ in
+            if let r = runner.result, let m = module {
+                let summary = ([r.logs.joined(separator: " "), r.result].filter { !$0.isEmpty }.joined(separator: " | ")).prefix(120)
+                store.recordRun(moduleName: m.name, summary: summary.isEmpty ? "(no output)" : String(summary), hadError: r.error != nil && !(r.error ?? "").isEmpty)
+            }
+        }
+    }
+}
+import SwiftUI
+
+// MARK: - Editor: type code -> Run -> Save (+ optional Pin as tab)
+struct EditorView: View {
+    @EnvironmentObject var store: ModuleStore
+    @Binding var selection: String
+
+    @State private var name = ""
+    @State private var code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+    @State private var pinAsPanel = true
+    @StateObject private var runner = SafeRunner()
+    @State private var loadedID: UUID? = nil
+    @State private var fontSize: Double = 15
+
+    private var isEditing: Bool { loadedID != nil }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(isEditing ? "Edit Module" : "Script Editor")
+                    .font(.title2.bold())
+
+                Text("Module name").font(.caption).foregroundStyle(.secondary)
+                TextField("My first module", text: $name)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Text("Script (JavaScript)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(code.components(separatedBy: "\n").count) lines").font(.caption).foregroundStyle(.secondary)
+                    Button("A-") { fontSize = max(11, fontSize - 1) }.font(.caption)
+                    Button("A+") { fontSize = min(22, fontSize + 1) }.font(.caption)
+                    Button("Clear") { code = "" }.font(.caption)
+                }
+                TextEditor(text: $code)
+                    .font(.system(size: fontSize, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 220)
+                    .padding(8)
+                    .background(Color(white: 0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        snippetButton("log", insert: "console.log(\"hello\");\n")
+                        snippetButton("loop", insert: "for (let i = 0; i < 5; i++) { console.log(i); }\n")
+                        snippetButton("func", insert: "function name() {\n  return 1;\n}\n")
+                        snippetButton("html", insert: "\"<div style='font-family:-apple-system;padding:20px;text-align:center'><h1>Hi</h1></div>\";\n")
+                        snippetButton("store", insert: "localStorage.setItem(\"key\", \"value\");\n")
+                    }
+                }
+
+                Toggle("Pin as tab panel on Save", isOn: $pinAsPanel)
+                    .font(.caption)
+
+                HStack {
+                    Button(runner.isRunning ? "Running…" : "Run") {
+                        runner.start(code)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    .disabled(runner.isRunning)
+                    if runner.isRunning {
+                        Button("Stop") { runner.stop() }
+                            .buttonStyle(.bordered)
+                    }
+                    Button("Save") {
+                        save()
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
+                if isEditing {
+                    Button("New blank script") {
+                        store.editingModuleID = nil
+                        loadedID = nil
+                        name = ""
+                        code = "// write your script here"
+                        runner.stop()
+                    }
+                    .font(.caption)
+                }
+
+                if let r = runner.result {
+                    RunOutputView(result: r)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Editor")
+        .background(Color.black.ignoresSafeArea())
+        .onAppear(perform: loadIfNeeded)
+        .onChange(of: store.editingModuleID) { _, _ in loadIfNeeded() }
+    }
+
+    private func loadIfNeeded() {
+        let target = store.editingModuleID
+        guard target != loadedID else { return }
+        loadedID = target
+        if let m = store.module(withID: target) {
+            name = m.name
+            code = m.code
+            pinAsPanel = m.isPinned
+        } else {
+            // Fresh script (Home -> Create, Modules -> +, or after Save).
+            // Always reset so we never show the previous module's text.
+            name = ""
+            code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+            pinAsPanel = true
+        }
+        runner.stop()
+    }
+
+    private func snippetButton(_ label: String, insert: String) -> some View {
+        Button(label) { code += insert }
+            .font(.caption)
+            .buttonStyle(.bordered)
+    }
+
+    private func save() {
+        let clean = name.trimmingCharacters(in: .whitespaces)
+        guard !clean.isEmpty else { return }
+        // Empty code is allowed but confirm-ish: save a placeholder comment
+        // so detail/panel never shows a blank confusing screen.
+        let finalCode = code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "// empty module\nconsole.log(\"empty module\");" : code
+        if let id = loadedID, store.module(withID: id) != nil {
+            store.update(id: id, name: clean, code: finalCode)
+            if let m = store.module(withID: id) { store.setPinned(m, pinned: pinAsPanel) }
+        } else {
+            let m = store.add(name: clean, code: finalCode, pinned: pinAsPanel)
+            loadedID = m.id
+            store.editingModuleID = m.id
+        }
+        store.editingModuleID = nil
+        loadedID = nil
+        name = ""
+        code = "// write your script here\nconsole.log(\"hello from XContainer\");\n1 + 2;"
+        runner.stop()
+        selection = "modules"
+    }
+}
+
+// MARK: - Recommended apps (same idea as the prototype)
+struct AppsView: View {
+    let apps: [(String, String)] = [
+        ("AltStore", "An alternative app store that lets you sideload apps onto your iOS device using your Apple ID."),
+        ("StikDebug", "A debugging-focused tool that helps inspect and interact with apps and system behavior."),
+        ("LocalDevVPN", "A local development VPN tool for testing and development."),
+        ("UTM", "A virtual machine app that lets you run other operating systems on your device."),
+        ("LiveContainer", "A container-style app that lets you run iOS apps without actually installing them!"),
+        ("XContainer", "Your own scripting container: create modules, run custom code, pin them as panels.")
+    ]
+
+    var body: some View {
+        List(apps, id: \.0) { app in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(app.0).font(.headline)
+                Text(app.1).font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
+        .navigationTitle("Recommended Apps")
+        .background(Color.black.ignoresSafeArea())
+    }
+}
+
+// MARK: - Settings
+struct SettingsView: View {
+    @EnvironmentObject var store: ModuleStore
+
+    var body: some View {
+        List {
+            Section {
+                Text("XContainer is a Swift scripting container. Write JavaScript modules in the Editor, run them on JavaScriptCore, save them, and pin them as their own tabs/panels.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("About XContainer") }
+
+            Section {
+                Button("Restore example modules") { store.restoreExamples() }
+                Button("Reset all modules", role: .destructive) { store.reset() }
+            } header: { Text("Modules") }
+
+            Section {
+                if store.history.isEmpty {
+                    Text("No runs yet. Run anything and it shows up here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.history.prefix(20)) { h in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(h.moduleName).font(.caption.bold())
+                                Spacer()
+                                Text(h.at, style: .time).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Text(h.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            if h.hadError { Text("error").font(.caption2).foregroundStyle(.red) }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    Button("Clear history", role: .destructive) { store.clearHistory() }
+                }
+            } header: { Text("Run history") }
+
+            Section {
+                Text("Modules are stored on-device (UserDefaults). Code runs locally with Apple's JavaScriptCore — no server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Storage & Engine") }
+        }
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Settings")
+    }
+}
+import SwiftUI
+
+@main
+struct XContainerApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
