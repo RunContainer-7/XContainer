@@ -293,6 +293,40 @@ final class ModuleStore: ObservableObject {
               else if ((you === "rock" && cpu === "scissors") || (you === "paper" && cpu === "rock") || (you === "scissors" && cpu === "paper")) "You win!";
               else "CPU wins!";
               """),
+            Template(name: "Tap Dash Game", category: "Games", blurb: "Playable! Tap the glowing tile. Real UI.", pinByDefault: true, code: """
+              // Tap Dash — REAL playable game. No edit needed.
+              // Use template, open its panel tab, hit Start, tap glowing tiles.
+              // Game logic lives inside the HTML below, so panel taps just work.
+              console.log("Tap Dash ready — open panel to play");
+              "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'>"
+              + "<style>"
+              + "body{font-family:-apple-system;background:#000;color:#fff;margin:0;padding:16px;text-align:center}"
+              + ".card{background:#111;border-radius:20px;padding:18px;max-width:420px;margin:0 auto}"
+              + ".row{display:flex;justify-content:space-between;align-items:center;margin:8px 0}"
+              + ".score{font-size:28px;font-weight:800}.time{font-size:15px;color:#aaa}"
+              + ".grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px}"
+              + ".tile{height:86px;border-radius:16px;background:#222;border:1px solid #333;font-size:30px;color:#fff}"
+              + ".tile.lit{background:#fff;color:#000;transform:scale(1.04)}"
+              + ".btn{background:#fff;color:#000;border:0;border-radius:12px;padding:12px 18px;font-weight:800;font-size:16px;width:100%;margin-top:12px}"
+              + ".hint{color:#888;font-size:12px;margin-top:10px}"
+              + "</style></head><body><div class='card'>"
+              + "<div style='font-size:13px;letter-spacing:2px;color:#888'>TAP DASH</div>"
+              + "<div class='row'><div class='score'>Score <span id='s'>0</span></div>"
+              + "<div class='time'>Time <span id='t'>20</span>s<br>Best <span id='b'>0</span></div></div>"
+              + "<div class='grid' id='g'></div>"
+              + "<button class='btn' id='start' onclick='startGame()'>Start game</button>"
+              + "<div class='hint'>Tap the white tile as fast as you can. 20 seconds.</div>"
+              + "</div><script>"
+              + "var score=0,time=20,timer=null,target=-1,playing=false;"
+              + "var best=0;try{best=parseInt(localStorage.getItem('tapdash_best')||'0')||0;}catch(e){}"
+              + "document.getElementById('b').innerText=best;"
+              + "function build(){var g=document.getElementById('g');g.innerHTML='';for(var i=0;i<9;i++){var b=document.createElement('button');b.className='tile';b.id='tile'+i;b.innerText='•';b.onclick=(function(i){return function(){hit(i);};})(i);g.appendChild(b);}}"
+              + "function pick(){var els=document.querySelectorAll('.tile');for(var i=0;i<els.length;i++)els[i].classList.remove('lit');target=Math.floor(Math.random()*9);document.getElementById('tile'+target).classList.add('lit');}"
+              + "function hit(i){if(!playing)return;if(i===target){score++;document.getElementById('s').innerText=score;pick();}else{score=Math.max(0,score-1);document.getElementById('s').innerText=score;}}"
+              + "function startGame(){score=0;time=20;playing=true;document.getElementById('s').innerText='0';document.getElementById('t').innerText='20';document.getElementById('start').innerText='Playing... tap white!';build();pick();clearInterval(timer);timer=setInterval(function(){time--;document.getElementById('t').innerText=time;if(time<=0){clearInterval(timer);playing=false;var nb=score>best?score:best;try{localStorage.setItem('tapdash_best',String(nb));}catch(e){}document.getElementById('b').innerText=nb;document.getElementById('start').innerText='Play again (scored '+score+')';}},1000);}"
+              + "build();"
+              + "</script></body></html>";
+              """),
             Template(name: "Calculator+", category: "Tools", blurb: "Better calculator.", code: """
               function calc(a, op, b) {
                 if (op === "+") return a + b;
